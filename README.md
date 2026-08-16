@@ -27,6 +27,7 @@
 - 🛠 **工具生态** — 文档生成、联网搜索、文件操作
 - 📱 **多平台接入** — 飞书、微信 iLink
 - 🔄 **消息同步** — 自建同步服务器，跨设备聊天记录增量同步
+- 🧩 **插件生态** — 目录即插件，第三方开放扩展，内置货币战争
 - 🌙 **主动聊天** — 路由可控 + 多渠道投递
 
 ---
@@ -291,6 +292,35 @@ call 窗口**没有文本输入框**或 PTT（Push-To-Talk）按钮，所有对�
 - **屏幕观察** — `get_screen_observation` 工具让 LLM 按需截图并用视觉模型
   分析用户屏幕活动，30 秒缓存复用，敏感信息模糊化。
 
+#### 🧩 插件系统
+- **插件包 = 目录**：`plugins/` 下放 `plugin.json`（清单）+ `index.js`（逻辑），
+  应用重启或设置页重新扫描即加载，每个插件独立开关、配置持久化。
+- **三类能力**：注册 AI 工具（`registerTools`，大模型可直接调用）、
+  设置页入口（`settingsSchema` 声明式表单自动渲染）、独立插件窗口
+  （`ui.mode: window`，自带 HTML，IPC 桥按插件 id 隔离）。
+- **安全模型**：`risk` 权限声明（safe / network / fs / shell 等档位），
+  加载与执行异常隔离（出错只禁用自身）；工具 id 与核心工具冲突自动跳过。
+- **双扫描根目录**：`appPath/plugins/` 内置随安装包分发；
+  `userData/plugins/` 用户自行安装，按 id 覆盖内置版本。
+- **内置插件**：`currency-wars`（《崩坏：星穹铁道》货币战争自动运行：
+  窗口定位截图 + OCR/VLM 识别，按词条规则自动选祝福与投资，带独立控制台窗口）、
+  `demo-window`（插件窗口示例）、`hello-settings`（设置页入口示例）。
+- 开发契约详见 [docs/cyrene-plugin-api-spec.md](./docs/cyrene-plugin-api-spec.md)。
+
+#### 🔄 消息同步
+- **用途**：桌面端与其他设备（如手机端前端）之间同步聊天记录，
+  一端聊天、多端可见，同时上报桌面端在线状态（心跳）。
+- **架构**：独立 Node.js 子项目 `client/`（sql.js 本地库），定时轮询自建同步服务器；
+  与主进程通过 stdout 行协议（`__SYNC_DATA__`）+ `outbox.json` / `merge-queue.json`
+  文件中转交互，完全解耦，崩溃重启不丢消息、未合并消息自动重发。
+- **协议设计**：三接口 —— `POST /presence` 心跳（3s 一次）、
+  `GET /pull` 增量拉取（`server_id` 断点续传、每批 100 条）、
+  `POST /push` 批量推送（每批 ≤50 条，`uid` 幂等去重）；
+  连续失败指数退避（上限 60s），成功后恢复基础间隔。
+- **服务器可自建**：任意语言按
+  [docs/cyrene-message-sync-api-spec.md](./docs/cyrene-message-sync-api-spec.md)
+  实现三个接口即可对接；地址配置在 `client/config.json` 的 `server_url`（留空即停用）。
+
 <details>
 <summary><b>🧩 高级功能</b>（点击展开）</summary>
 
@@ -304,23 +334,6 @@ call 窗口**没有文本输入框**或 PTT（Push-To-Talk）按钮，所有对�
 - 支持 stdio / SSE / HTTP 三种 transport。
 - 内置 servers 自动同步，`install_mcp_server` 工具让 Agent 自动装新 server。
 - 自带 Playwright MCP 配置。
-
-#### 🧩 插件化架构
-- `plugins/` 目录即插件包：`plugin.json` 声明 + `index.js` 逻辑，
-  重启或设置页重扫描即可加载，开关独立控制。
-- 插件可注册 AI 工具（`registerTools`）、设置页入口与独立插件窗口，
-  经 preload 窗口桥与主进程安全通信。
-- 内置示例插件：`currency-wars`（货币战争）、`demo-window`、`hello-settings`。
-- 开发契约详见 [docs/cyrene-plugin-api-spec.md](./docs/cyrene-plugin-api-spec.md)。
-
-#### 🔄 消息同步
-- **独立 Node.js 子项目**（`client/`，sql.js 本地库）——定时轮询自建
-  同步服务器，心跳 / 增量拉取 / 批量推送三接口，`uid` 幂等去重、
-  `server_id` 断点续传、失败指数退避。
-- **与主进程解耦** —— stdout 行协议 + `outbox.json` / `merge-queue.json`
-  文件中转，拉到的消息自动合并进桌面端聊天存储，崩溃重启不丢消息。
-- 服务器地址在 `client/config.json` 的 `server_url` 配置（留空即停用），
-  接口规范详见 [docs/cyrene-message-sync-api-spec.md](./docs/cyrene-message-sync-api-spec.md)。
 
 #### 📱 外部渠道
 - **飞书 Lark 长连接** — 官方 SDK + WebSocket（无需公网 / 域名 / 内网穿透），
@@ -384,6 +397,35 @@ call 窗口**没有文本输入框**或 PTT（Push-To-Talk）按钮，所有对�
 - 文件监视 / 热更新：`watchWorldbookFile` 等运行时热加载。
 
 </details>
+
+---
+
+## 🔓 插件的开源与开放特性
+
+插件系统是本项目的开放核心：第三方无需修改主程序即可扩展能力，
+整个插件生命周期（开发 → 安装 → 分发）都是开放的。
+
+- **开发开放**：插件就是一个目录（`plugin.json` 清单 + `index.js` 逻辑），
+  无需编译进主程序、无签名校验，对照 [docs/cyrene-plugin-api-spec.md](./docs/cyrene-plugin-api-spec.md)
+  即可上手；接口契约只增不删，破坏性变更升大版本。
+- **安装开放**：把插件目录放进 `userData/plugins/` 即可被扫描加载，
+  同 id 覆盖内置版本——用户可自行修复或魔改内置插件而不必 fork 整个项目。
+- **分发开放**：插件包自包含（可带图标 / 自带窗口 HTML / 任意 lib 模块），
+  直接拷目录即可在机器间迁移与分享。
+- **权限透明**：清单里的 `risk` 声明（safe / network / fs / shell 等）
+  明示插件能力边界；运行异常只禁用插件自身，不拖垮宿主。
+- **数据隔离**：每个插件有独立数据目录（`userData/plugins/<id>/data`），
+  开关与配置存 `plugin-state.json`，卸载后不残留脏数据。
+
+配套的技术实现要点：
+
+| 环节 | 实现方式 |
+| --- | --- |
+| 加载 | 双根目录全量扫描 → `plugin.json` 清单校验 → 按开关状态 `require` 入口 → 工具注册进 ToolRegistry |
+| 工具注入 | `registerTools(ctx)` 返回的工具与核心工具同权参与 function calling，id 冲突自动跳过 |
+| 插件窗口 | `ui.mode: window` 自带 HTML，preload 桥按插件 id 隔离（只能调自己注册的工具），窗口策略 new / background / reuse 三态 |
+| 宿主服务 | 插件用 `uses` 声明依赖宿主能力（如 gamebot），经 `ctx.services` 按名取用，未提供时判空降级 |
+| 状态持久化 | `userData/plugin-state.json`（enabled + settings），不侵入核心 settings.json |
 
 ---
 
