@@ -26,6 +26,7 @@
 - 🖥️ **屏幕监控** — VLM 分析屏幕活动，主动消息智能判断是否打扰
 - 🛠 **工具生态** — 文档生成、联网搜索、文件操作
 - 📱 **多平台接入** — 飞书、微信 iLink
+- 🔄 **消息同步** — 自建同步服务器，跨设备聊天记录增量同步
 - 🌙 **主动聊天** — 路由可控 + 多渠道投递
 
 ---
@@ -224,6 +225,8 @@ call 窗口**没有文本输入框**或 PTT（Push-To-Talk）按钮，所有对�
 | 🔊 TTS / ASR / 文档生成 / 联网搜索 / 文件操作 | ✅ 可用（部分需配置） |
 | 📱 飞书 Lark 长连接 | 🧪 实验性 |
 | 📱 微信 iLink Bot | 🧪 实验性 |
+| 🔄 消息同步（client/ 子项目 + 自建同步服务器） | 🧪 实验性 |
+| 🧩 插件化架构（plugins/ 内置插件包） | 🧪 实验性 |
 | 🤖 Game Bot 游戏自动化 | 🧪 实验性 |
 | 🔌 MCP（Model Context Protocol）生态 | 🧪 实验性 |
 | ✨ Skill 系统 | ✅ 可用 |
@@ -302,6 +305,23 @@ call 窗口**没有文本输入框**或 PTT（Push-To-Talk）按钮，所有对�
 - 内置 servers 自动同步，`install_mcp_server` 工具让 Agent 自动装新 server。
 - 自带 Playwright MCP 配置。
 
+#### 🧩 插件化架构
+- `plugins/` 目录即插件包：`plugin.json` 声明 + `index.js` 逻辑，
+  重启或设置页重扫描即可加载，开关独立控制。
+- 插件可注册 AI 工具（`registerTools`）、设置页入口与独立插件窗口，
+  经 preload 窗口桥与主进程安全通信。
+- 内置示例插件：`currency-wars`（货币战争）、`demo-window`、`hello-settings`。
+- 开发契约详见 [docs/cyrene-plugin-api-spec.md](./docs/cyrene-plugin-api-spec.md)。
+
+#### 🔄 消息同步
+- **独立 Node.js 子项目**（`client/`，sql.js 本地库）——定时轮询自建
+  同步服务器，心跳 / 增量拉取 / 批量推送三接口，`uid` 幂等去重、
+  `server_id` 断点续传、失败指数退避。
+- **与主进程解耦** —— stdout 行协议 + `outbox.json` / `merge-queue.json`
+  文件中转，拉到的消息自动合并进桌面端聊天存储，崩溃重启不丢消息。
+- 服务器地址在 `client/config.json` 的 `server_url` 配置（留空即停用），
+  接口规范详见 [docs/cyrene-message-sync-api-spec.md](./docs/cyrene-message-sync-api-spec.md)。
+
 #### 📱 外部渠道
 - **飞书 Lark 长连接** — 官方 SDK + WebSocket（无需公网 / 域名 / 内网穿透），
   p2p 私聊，多模态 text / image / audio / video / file / sticker。
@@ -376,6 +396,7 @@ call 窗口**没有文本输入框**或 PTT（Push-To-Talk）按钮，所有对�
 | Live2D | `pixi-live2d-display` 0.5.0-beta + Cubism Core |
 | AI / MCP | `@modelcontextprotocol/sdk`, `@ag-ui/core`, `@ag-ui/client` |
 | 集成 | 飞书 OpenAPI、微信 iLink、Nodemailer、PDFKit、docx |
+| 消息同步 | Node.js 子项目（`client/`）+ sql.js + HTTP 轮询 |
 | 测试 | Vitest 4 |
 
 ---
@@ -383,6 +404,21 @@ call 窗口**没有文本输入框**或 PTT（Push-To-Talk）按钮，所有对�
 ## 📦 项目结构
 
 ```
+docs/                  # 对外接口规范
+├── cyrene-message-sync-api-spec.md  # 消息同步服务器接口规范
+└── cyrene-plugin-api-spec.md        # 插件 API 调用规范
+
+client/                # 消息同步客户端（独立 Node.js 子项目，需单独 npm install）
+├── sync.js            # 轮询同步主逻辑（心跳 / 拉取 / 推送 / 退避）
+├── db.js              # sql.js 本地库（断点 / 同步状态）
+├── config.json        # server_url / 轮询参数 / 断点游标
+└── index.js           # 入口（与主进程 stdout 行协议通信）
+
+plugins/               # 内置插件包（运行时扫描加载，规范见 docs/）
+├── currency-wars/     # 货币战争
+├── demo-window/       # 插件窗口示例
+└── hello-settings/    # 设置页入口示例
+
 models/                # 本地 AI 模型（用户放置，见 docs/local-models.md）
 ├── Xenova/
 │   ├── bge-m3/       # Embedding 模型（贴纸语义 + 场景识别，~570MB）
@@ -402,15 +438,20 @@ src/
 │   ├── embedding-manager.ts  # 本地 embedding 模型生命周期
 │   ├── game-bot/     # 游戏自动化（game-recipes 驱动）
 │   ├── memory/       # L0/L1/L2 记忆引擎
+│   ├── music/        # 背景音乐 / 音效
 │   ├── opener/       # 启动器 / 托盘 / 单实例
 │   ├── orchestrator/ # Agent 主循环 + 工具调度
+│   ├── plugins/      # 插件化框架（扫描 / 加载 / 工具注册 / 窗口宿主）
+│   ├── proactive/    # 主动聊天（路由 / 门控 / 投递）
 │   ├── rag/          # 检索增强生成 + worldbook 注入
 │   ├── relationship/ # 用户关系画像
 │   ├── scheduler/    # 定时任务（提醒 / 日程）
 │   ├── screen-monitor/ # 屏幕监控（截图+VLM分析+状态机）
 │   ├── sim/          # 场景模拟工具
 │   ├── skills/       # Agent skill 系统
+│   ├── social-context/ # 社交上下文（对话连续性缓存）
 │   ├── sticker-*.ts  # 贴纸语义匹配（协议 / 存储 / 描述 / embedder）
+│   ├── sync/         # 消息同步主进程侧（spawn client/ + 消息合并）
 │   ├── tts/          # 语音合成（多引擎）
 │   └── work/         # Work 模式（Router→Plan→ActionGate）
 ├── preload/          # Electron preload 桥接
