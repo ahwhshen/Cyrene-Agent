@@ -116,9 +116,8 @@ client/merge-queue.json
 # electron-builder output
 release/
 
-# 版权音频默认不入库；背景音乐《Ripples of Past Reverie》随仓库分发，单独放行（若收到版权通知，移除此行并删除文件）
+# 版权音频不入库（《Ripples of Past Reverie》为商业发行歌曲，需自行放到 src/renderer/public/audio/）
 *.flac
-!src/renderer/public/audio/ripples-of-past-reverie.flac
 
 # 本地启动脚本/调试残留（含个人机器路径）
 CyreneStart.vbs

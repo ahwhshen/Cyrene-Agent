@@ -675,8 +675,8 @@ const closeBtn = document.getElementById("close-btn") as HTMLButtonElement;
 const clickSound = new Audio("../audio/click.mp3");
 clickSound.preload = "auto";
 
-// 背景音乐：音乐文件夹里的《昔涟》（张韶涵HOYO-MiX）
-const bgmAudio = new Audio("../audio/ripples-of-past-reverie.flac");
+// 背景音乐：内置 bgm.mp3（随仓库分发；本地可自行替换为其他音源）
+const bgmAudio = new Audio("../audio/bgm.mp3");
 bgmAudio.preload = "auto";
 bgmAudio.loop = true;
 const apiForm = document.getElementById("api-form") as HTMLFormElement;
