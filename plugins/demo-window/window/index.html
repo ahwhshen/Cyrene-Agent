@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>独立窗口示例</title>
+  <style>
+    :root {
+      --c1: #ff9ff3;
+      --c2: #a29bfe;
+      --c3: #81ecec;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      color: #f5f0ff;
+      background: linear-gradient(140deg, #1c1230 0%, #2b1650 55%, #3b1d4f 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 22px;
+      padding: 28px;
+      overflow: hidden;
+      user-select: none;
+    }
+    body.theme-night {
+      background: linear-gradient(140deg, #0d1526 0%, #1b2a45 55%, #222f3e 100%);
+    }
+    h1 { font-size: 20px; font-weight: 600; letter-spacing: 0.04em; }
+    .hint { font-size: 12px; opacity: 0.55; }
+    .palette {
+      display: flex;
+      gap: 14px;
+    }
+    .swatch {
+      width: 64px;
+      height: 64px;
+      border-radius: 18px;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+      display: grid;
+      place-items: center;
+      font-size: 10px;
+      color: rgba(20, 10, 30, 0.75);
+      font-weight: 600;
+      transition: transform 0.18s ease;
+    }
+    .swatch:hover { transform: translateY(-4px); }
+    .actions { display: flex; gap: 10px; }
+    button {
+      padding: 9px 18px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      background: rgba(255, 255, 255, 0.08);
+      color: #f5f0ff;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.15s ease, transform 0.15s ease;
+    }
+    button:hover { background: rgba(255, 255, 255, 0.16); transform: translateY(-1px); }
+    .result {
+      min-height: 18px;
+      font-size: 12px;
+      opacity: 0.7;
+      max-width: 420px;
+      text-align: center;
+      word-break: break-all;
+    }
+    .signature {
+      position: absolute;
+      bottom: 14px;
+      font-size: 11px;
+      opacity: 0.45;
+      letter-spacing: 0.05em;
+    }
+  </style>
+</head>
+<body>
+  <h1 id="title">独立窗口示例插件</h1>
+  <div class="hint">插件 id：<span id="plugin-id">?</span> · 通过 window.cyrenePlugin 桥与主进程通信</div>
+
+  <div class="palette" id="palette"></div>
+
+  <div class="actions">
+    <button type="button" id="refresh-btn">刷新调色板</button>
+    <button type="button" id="greet-btn">读取配置</button>
+  </div>
+
+  <div class="result" id="result">等待操作…</div>
+  <div class="signature" id="signature"></div>
+
+  <script>
+    const bridge = window.cyrenePlugin;
+    const paletteEl = document.getElementById("palette");
+    const resultEl = document.getElementById("result");
+
+    document.getElementById("plugin-id").textContent = bridge ? bridge.pluginId : "(桥未注入)";
+
+    function renderPalette(colors) {
+      paletteEl.innerHTML = "";
+      for (const color of colors) {
+        const div = document.createElement("div");
+        div.className = "swatch";
+        div.style.background = color;
+        div.textContent = color;
+        paletteEl.appendChild(div);
+      }
+    }
+
+    async function refreshPalette() {
+      if (!bridge) return;
+      try {
+        const raw = await bridge.callTool("demo_window_palette");
+        const data = JSON.parse(raw);
+        document.body.classList.toggle("theme-night", data.theme === "night");
+        renderPalette(data.colors);
+        resultEl.textContent = `主题：${data.theme}`;
+      } catch (err) {
+        resultEl.textContent = "调用失败：" + err;
+      }
+    }
+
+    async function showSettings() {
+      if (!bridge) return;
+      const settings = await bridge.getSettings();
+      resultEl.textContent = "当前配置：" + JSON.stringify(settings);
+      applySettings(settings);
+    }
+
+    function applySettings(settings) {
+      document.body.classList.toggle("theme-night", settings.theme === "night");
+      document.getElementById("signature").textContent = settings.signature || "";
+    }
+
+    document.getElementById("refresh-btn").addEventListener("click", refreshPalette);
+    document.getElementById("greet-btn").addEventListener("click", showSettings);
+
+    // 设置页保存配置后实时同步
+    if (bridge) {
+      bridge.onSettingsChange(() => { void showSettings(); });
+      void showSettings().then(refreshPalette);
+    }
+  </script>
+</body>
+</html>

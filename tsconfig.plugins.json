@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "lib": ["ES2022"],
+    "outDir": "plugins/currency-wars/lib",
+    "rootDir": "plugins/currency-wars/src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": false,
+    "sourceMap": true
+  },
+  "include": ["plugins/currency-wars/src/**/*.ts"],
+  "exclude": ["plugins/currency-wars/src/**/*.test.ts"]
+}

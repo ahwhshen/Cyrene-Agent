@@ -1,0 +1,61 @@
+{
+  "id": "hello-settings",
+  "name": "打招呼示例插件",
+  "description": "settings 模式示例：设置页按 settingsSchema 自动渲染配置表单，并注册一个演示工具。",
+  "version": "1.0.0",
+  "entry": "index.js",
+  "icon": "icon.png",
+  "defaultEnabled": true,
+  "risk": ["safe"],
+  "settingsSchema": [
+    {
+      "key": "nickname",
+      "type": "text",
+      "label": "称呼",
+      "default": "主人",
+      "placeholder": "工具打招呼时使用的称呼",
+      "section": "基础配置"
+    },
+    {
+      "key": "style",
+      "type": "select",
+      "label": "语气风格",
+      "default": "sweet",
+      "options": [
+        { "value": "sweet", "label": "甜甜的" },
+        { "value": "lively", "label": "活泼的" },
+        { "value": "formal", "label": "正式的" }
+      ],
+      "section": "基础配置"
+    },
+    {
+      "key": "appendTime",
+      "type": "checkbox",
+      "label": "附带当前时间",
+      "default": false,
+      "section": "高级配置"
+    },
+    {
+      "key": "timeFormat",
+      "type": "select",
+      "label": "时间格式",
+      "default": "cn",
+      "options": [
+        { "value": "cn", "label": "中文（2026年8月17日）" },
+        { "value": "iso", "label": "ISO（2026-08-17）" }
+      ],
+      "section": "高级配置",
+      "visibleWhen": { "key": "appendTime", "equals": true }
+    },
+    {
+      "key": "repeatCount",
+      "type": "number",
+      "label": "问候重复次数",
+      "default": 1,
+      "section": "高级配置"
+    }
+  ],
+  "ui": {
+    "mode": "settings"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "cyrene-sync-client",
+  "version": "1.0.0",
+  "description": "Cyrene Agent 消息同步客户端",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "sql.js": "^1.12.0"
+  }
+}

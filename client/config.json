@@ -1,0 +1,6 @@
+{
+  "server_url": "",
+  "poll_interval": 3000,
+  "timeout_ms": 5000,
+  "max_server_id": 0
+}

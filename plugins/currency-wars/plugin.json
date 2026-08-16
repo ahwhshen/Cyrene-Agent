@@ -1,0 +1,65 @@
+{
+  "id": "currency-wars",
+  "name": "星穹铁道·货币战争",
+  "description": "《崩坏：星穹铁道》货币战争自动运行：窗口定位截图 + OCR/VLM 识别，按词条规则自动选祝福与投资。",
+  "version": "1.0.0",
+  "entry": "lib/index.js",
+  "icon": "icon.png",
+  "defaultEnabled": false,
+  "risk": ["shell"],
+  "uses": ["gamebot"],
+  "settingsSchema": [
+    { "key": "exePath", "type": "text", "label": "游戏 exe 路径", "section": "基础", "default": "", "placeholder": "StarRail.exe 完整路径（留空则用游戏代肝共享配置）" },
+
+    { "key": "flowMode", "type": "select", "label": "运行流程", "section": "运行流程", "default": "combined",
+      "options": [{ "value": "combined", "label": "组合模式（局外+局内）" }, { "value": "outer", "label": "仅局外" }] },
+    { "key": "targetMode", "type": "select", "label": "目标定位", "default": "fullscreen",
+      "options": [{ "value": "fullscreen", "label": "本地全屏（按进程检测）" }, { "value": "window", "label": "窗口（按标题，云游戏可用）" }] },
+    { "key": "autoLaunch", "type": "checkbox", "label": "自动启动游戏", "default": false },
+    { "key": "windowTitle", "type": "text", "label": "窗口标题关键字", "default": "崩坏", "visibleWhen": { "key": "targetMode", "equals": "window" } },
+    { "key": "maxRounds", "type": "number", "label": "最大轮数（0=不限）", "default": 0 },
+    { "key": "recognitionOnly", "type": "checkbox", "label": "仅识别不动作（演练模式）", "default": false },
+    { "key": "elevatedInput", "type": "checkbox", "label": "使用管理员输入助手", "default": false },
+
+    { "key": "targetWords", "type": "text", "label": "目标词条（逗号分隔）", "section": "目标与投资", "default": "忍无可忍，第一位面强化，第二位面强化，第三位面强化" },
+    { "key": "debuffEnabled", "type": "checkbox", "label": "检测局外减益", "default": true },
+    { "key": "targetMatchAny", "type": "checkbox", "label": "目标词条命中任一即可", "default": true },
+    { "key": "stopOnTargetMatch", "type": "checkbox", "label": "命中目标后停止", "default": true },
+    { "key": "blockedWords", "type": "text", "label": "拦截词条（逗号分隔）", "default": "能量逃逸" },
+    { "key": "blockedEnabled", "type": "checkbox", "label": "启用拦截词条", "default": true },
+    { "key": "investmentTargets", "type": "text", "label": "局外投资目标（逗号分隔）", "default": "彩虹时代" },
+    { "key": "investmentEnabled", "type": "checkbox", "label": "启用局外投资", "default": true },
+    { "key": "checkInvestmentWhenBlocked", "type": "checkbox", "label": "被拦截时仍检查投资", "default": false },
+    { "key": "strategyTargets", "type": "text", "label": "策略目标（逗号分隔）", "default": "黑塔纪元，采购专员" },
+    { "key": "inGameInvestmentTargets", "type": "text", "label": "局内投资目标（逗号分隔）", "default": "彩虹时代，头彩，银·金·彩，人才下沉，英雄登场" },
+
+    { "key": "combinedMainRule", "type": "select", "label": "组合模式·主目标规则", "section": "组合模式规则", "default": "stop",
+      "options": [{ "value": "stop", "label": "命中即停" }, { "value": "require", "label": "必须命中" }, { "value": "optional", "label": "可选" }, { "value": "ignore", "label": "忽略" }] },
+    { "key": "combinedBlockedRule", "type": "select", "label": "组合模式·拦截规则", "default": "ignore",
+      "options": [{ "value": "ignore", "label": "忽略" }, { "value": "restart", "label": "重开本轮" }, { "value": "continue", "label": "继续" }] },
+    { "key": "combinedOuterInvestmentRule", "type": "select", "label": "组合模式·局外投资规则", "default": "ignore",
+      "options": [{ "value": "ignore", "label": "忽略" }, { "value": "require", "label": "必须命中" }, { "value": "optional", "label": "可选" }, { "value": "stop", "label": "命中即停" }] },
+    { "key": "combinedInGameInvestmentRule", "type": "select", "label": "组合模式·局内投资规则", "default": "ignore",
+      "options": [{ "value": "ignore", "label": "忽略" }, { "value": "require", "label": "必须命中" }, { "value": "optional", "label": "可选" }] },
+
+    { "key": "fuzzyScore", "type": "number", "label": "目标模糊匹配阈值", "section": "识别阈值", "default": 85 },
+    { "key": "blockedFuzzyScore", "type": "number", "label": "拦截模糊匹配阈值", "default": 85 },
+    { "key": "buttonFuzzyScore", "type": "number", "label": "按钮模糊匹配阈值", "default": 78 },
+    { "key": "investmentFuzzyScore", "type": "number", "label": "投资模糊匹配阈值", "default": 88 },
+
+    { "key": "autoDetectOcr", "type": "checkbox", "label": "自动探测本地 OCR（Better-HSRCW）", "section": "OCR", "default": true },
+    { "key": "ocrCommand", "type": "text", "label": "OCR 命令（留空用自动探测/VLM）", "default": "" },
+    { "key": "ocrArgs", "type": "text", "label": "OCR 参数（逗号分隔）", "default": "" }
+  ],
+  "ui": {
+    "mode": "window",
+    "entry": "window/index.html",
+    "window": {
+      "width": 760,
+      "height": 580,
+      "title": "货币战争控制台",
+      "resizable": true,
+      "policy": "reuse"
+    }
+  }
+}

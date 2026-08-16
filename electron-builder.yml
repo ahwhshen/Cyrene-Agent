@@ -1,0 +1,119 @@
+# electron-builder configuration
+# Docs: https://www.electron.build/configuration
+
+appId: com.cyrene.live2d
+productName: "Cyrene"
+copyright: "Copyright © 2024 Cyrene"
+
+directories:
+  output: release
+  buildResources: assets
+
+files:
+  # Include built application code
+  - dist/**/*
+  # Include preload scripts
+  - preload/**/*
+  # Include application assets (Live2D model, icons, etc.)
+  - assets/**/*
+  # Include prompts and worldbook
+  - prompts/**/*
+  # Include skills
+  - skills/**/*
+  # Include 内置插件包（货币战争、demo-window、hello-settings 等，运行时扫描 appPath/plugins）
+  - plugins/**/*
+  # Include game recipes
+  - game-recipes/**/*
+  # Include models (reranker/embedding 配置 + tokenizer + onnx 权重，全部随包分发)
+  - models/**/*
+  # Include package.json for runtime
+  - package.json
+  # Include vendor if needed
+  - vendor/**/*
+  # Exclude development files
+  - "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}"
+  - "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}"
+  - "!**/node_modules/*.d.ts"
+  - "!**/node_modules/.bin"
+  # Exclude heavy optional dependencies (not needed for core functionality)
+  - "!**/node_modules/playwright"
+  - "!**/node_modules/playwright-core"
+  - "!**/node_modules/@playwright"
+
+# Extra resources that need to be bundled
+# 注：Live2D Cubism Core 已由 renderer/public/live2dcubismcore.min.js 随前端打包，无需额外资源
+extraFiles:
+  # 启动脚本部署到安装根目录（$INSTDIR\CyreneLauncher.vbs），桌面快捷方式指向它；
+  # 注意必须用 extraFiles（安装根目录），extraResources 会放进 resources\ 子目录
+  - from: build/CyreneLauncher.vbs
+    to: CyreneLauncher.vbs
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: assets/tray-icon.ico
+
+nsis:
+  # Custom NSIS script for disclaimer page
+  include: build/installer.nsh
+  # Allow user to choose installation directory
+  oneClick: false
+  # Allow user to choose per-user or machine installation
+  perMachine: false
+  # Allow user to choose installation directory
+  allowToChangeInstallationDirectory: true
+  # 桌面快捷方式改由 installer.nsh 选项页控制（指向 CyreneLauncher.vbs 启动脚本），
+  # 模板自带的无条件创建必须关掉，否则会出现两个快捷方式
+  createDesktopShortcut: false
+  # Create start menu shortcut
+  createStartMenuShortcut: true
+  # Shortcut name
+  shortcutName: "Cyrene"
+  # Installer icon
+  installerIcon: assets/tray-icon.ico
+  # Uninstaller icon
+  uninstallerIcon: assets/tray-icon.ico
+  # Installer header icon
+  installerHeaderIcon: assets/tray-icon.ico
+  # Installer sidebar image (164x314)
+  # installerSidebar: assets/installer-sidebar.bmp
+  # Unicode installer
+  unicode: true
+  # Run after install
+  runAfterFinish: true
+  # Delete app data on uninstall
+  deleteAppDataOnUninstall: false
+
+# macOS configuration (for future reference)
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  icon: assets/tray-icon.ico
+  category: public.app-category.entertainment
+
+# Linux configuration (for future reference)
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  icon: assets/tray-icon.ico
+  category: Entertainment
+
+# Exclude patterns for sensitive data
+# Note: userData is created at runtime and never bundled
+# API keys, user profile, etc. are stored in userData, not in the app package
+
+# ASAR packaging (improves load performance)
+asar: true
+# onnx 权重与 tokenizer 从 asar 解包出来，避免原生模块/大文件读取问题
+asarUnpack:
+  - "models/**"
+
+# Compression
+compression: maximum

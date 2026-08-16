@@ -1,0 +1,169 @@
+// GPT-SoVITS 本地 TTS 引擎
+// 接口：官方 api_v2 (POST /api/tts)，返回 wav 字节
+// 参考：https://github.com/RVC-Boss/GPT-SoVITS
+import * as fs from "fs";
+import type { GptsovitsAdvancedOptions } from "../../shared/tts-types";
+
+export interface GptsovitsSynthesizeOptions extends GptsovitsAdvancedOptions {
+  baseUrl: string;          // 形如 "http://localhost:9880"，不含路径
+  refAudioPath: string;     // 参考音频绝对路径
+  promptText: string;      // 参考音频对应的文本
+  text: string;             // 待合成文本
+  speed?: number;           // 0.5~2，默认 1
+  format?: "wav" | "mp3";   // 默认 wav（注意：GPT-SoVITS 不支持 mp3，会自动回退到 wav）
+  timeoutMs?: number;      // 默认 60000（本地推理可能较慢）
+  debugLog?: (entry: Record<string, unknown>) => void;
+}
+
+export interface GptsovitsSynthesizeResult {
+  audio: Buffer;
+  format: "wav" | "mp3";
+}
+
+const DEFAULT_TIMEOUT_MS = 180000;
+const TTS_PATH = "/tts";
+const activeWeights = new Map<string, string>();
+let operationQueue: Promise<void> = Promise.resolve();
+
+function enqueue<T>(operation: () => Promise<T>): Promise<T> {
+  const result = operationQueue.then(operation, operation);
+  operationQueue = result.then(() => undefined, () => undefined);
+  return result;
+}
+
+async function applyWeight(baseUrl: string, endpoint: string, weightsPath: string, signal: AbortSignal): Promise<void> {
+  if (!fs.existsSync(weightsPath)) throw new Error(`GPT-SoVITS 权重文件不存在: ${weightsPath}`);
+  const url = `${baseUrl.replace(/\/+$/, "")}${endpoint}?weights_path=${encodeURIComponent(weightsPath)}`;
+  const resp = await fetch(url, { method: "GET", signal });
+  if (!resp.ok) {
+    const detail = (await resp.text().catch(() => "")).slice(0, 300);
+    throw new Error(`GPT-SoVITS 权重切换失败: ${resp.status} ${detail}`);
+  }
+}
+
+async function ensureWeights(opts: GptsovitsSynthesizeOptions, signal: AbortSignal): Promise<void> {
+  const baseUrl = opts.baseUrl.replace(/\/+$/, "");
+  const gpt = opts.gptWeightsPath?.trim() ?? "";
+  const sovits = opts.sovitsWeightsPath?.trim() ?? "";
+  const signature = JSON.stringify([opts.version ?? "auto", gpt, sovits]);
+  if ((!gpt && !sovits) || activeWeights.get(baseUrl) === signature) return;
+  if (gpt) await applyWeight(baseUrl, "/set_gpt_weights", gpt, signal);
+  if (sovits) await applyWeight(baseUrl, "/set_sovits_weights", sovits, signal);
+  activeWeights.set(baseUrl, signature);
+}
+
+/**
+ * 调 GPT-SoVITS api_v2。
+ * 请求体 application/x-www-form-urlencoded：
+ *   refer_wav_path / prompt_text / text / text_language / prompt_language / speed_factor / streaming / format
+ * 返回完整 wav（或 mp3）字节。
+ */
+export async function synthesize(opts: GptsovitsSynthesizeOptions): Promise<GptsovitsSynthesizeResult> {
+  // GPT-SoVITS 不支持 mp3，只支持 wav/raw/ogg/aac，mp3 自动回退到 wav
+  const requestedFormat = opts.format ?? "wav";
+  const format: "wav" | "mp3" = requestedFormat === "mp3" ? "wav" : requestedFormat;
+  const mediaType = format; // 发给 API 的 media_type
+  return enqueue(() => synthesizeLocked(opts, format, mediaType));
+}
+
+async function synthesizeLocked(opts: GptsovitsSynthesizeOptions, format: "wav" | "mp3", mediaType: string): Promise<GptsovitsSynthesizeResult> {
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const requestId = `gptsovits-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const startedAt = Date.now();
+
+  const log = (entry: Record<string, unknown>) => {
+    try { opts.debugLog?.({ requestId, ts: new Date().toISOString(), ...entry }); } catch { /* ignore */ }
+  };
+
+  // 1) 输入校验
+  if (!opts.baseUrl) throw new Error("缺少 GPT-SoVITS API 地址");
+  if (!opts.refAudioPath) throw new Error("缺少参考音频路径");
+  if (!opts.promptText) throw new Error("缺少参考音频对应的文本");
+  if (!opts.text) throw new Error("缺少合成文本");
+  if (!fs.existsSync(opts.refAudioPath)) {
+    throw new Error(`参考音频文件不存在: ${opts.refAudioPath}`);
+  }
+
+  // 2) 构造 JSON body（裸对象，不包 data）
+  // 契约参考 GPT-SoVITS api_v2.py: POST /tts，body 是 TTS_Request 模型
+  // 必需字段：text / text_lang / ref_audio_path / prompt_lang
+  // 注意：GPT-SoVITS media_type 只支持 wav/raw/ogg/aac，不支持 mp3
+  const body = JSON.stringify({
+    text: opts.text,
+    text_lang: "zh",
+    ref_audio_path: opts.refAudioPath,
+    prompt_text: opts.promptText,
+    prompt_lang: "zh",
+    speed_factor: opts.speed ?? 1,
+    text_split_method: opts.textSplitMethod ?? "cut5",
+    top_k: opts.topK ?? 15,
+    top_p: opts.topP ?? 1,
+    temperature: opts.temperature ?? 1,
+    repetition_penalty: opts.repetitionPenalty ?? 1.35,
+    sample_steps: opts.sampleSteps ?? 32,
+    streaming_mode: false,
+    media_type: mediaType,
+  });
+
+  // baseUrl 去掉尾部斜杠，拼 /api/tts
+  const url = opts.baseUrl.replace(/\/+$/, "") + TTS_PATH;
+
+  log({
+    phase: "request.begin",
+    endpoint: url,
+    textChars: Array.from(opts.text).length,
+    refAudioPath: opts.refAudioPath,
+    format,
+  });
+
+  // 3) 发请求 + 超时控制
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  let resp: Response;
+  try {
+    await ensureWeights(opts, controller.signal);
+    resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    if (err instanceof Error && err.name === "AbortError") {
+      log({ phase: "error", error: `合成超时（${timeoutMs}ms）`, durationMs: Date.now() - startedAt });
+      throw new Error(`GPT-SoVITS 合成超时（${timeoutMs}ms），检查服务是否在跑`);
+    }
+    log({ phase: "error", error: err instanceof Error ? err.message : String(err), durationMs: Date.now() - startedAt });
+    throw new Error(`GPT-SoVITS 请求失败: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  clearTimeout(timer);
+
+  // 4) 响应处理
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => "");
+    const preview = text.slice(0, 200);
+    log({ phase: "error", status: resp.status, bodyPreview: preview, durationMs: Date.now() - startedAt });
+    throw new Error(`GPT-SoVITS 合成失败: ${resp.status} ${preview}`);
+  }
+
+  const audio = Buffer.from(await resp.arrayBuffer());
+
+  // 校验 magic bytes：wav 以 "RIFF" 开头，mp3 以 ID3 或 0xFF 0xFB 开头
+  const isWav = audio.slice(0, 4).toString("ascii") === "RIFF";
+  const isMp3 = audio[0] === 0x49 /* I (ID3) */ || audio[0] === 0xff;
+  if (format === "wav" && !isWav && !isMp3) {
+    log({ phase: "warn", message: "期望 wav 但返回的不是 RIFF 头", firstBytes: audio.slice(0, 4).toString("hex") });
+  }
+
+  log({
+    phase: "response.final",
+    durationMs: Date.now() - startedAt,
+    audioBytes: audio.length,
+    isWav,
+    isMp3,
+  });
+
+  return { audio, format };
+}

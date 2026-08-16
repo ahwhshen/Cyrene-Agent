@@ -1,0 +1,548 @@
+import * as path from "path";
+import * as fs from "fs";
+import { getUserDataDir, getAppRootDir } from "../runtime/runtime-paths";
+import { getEmbeddingProvider, resetEmbeddingProvider, EmbeddingProvider, switchEmbeddingModel as switchModel, getCurrentModelDims } from "./embedding";
+import { JsonVectorStore } from "./vectorstore";
+import type { ChatHistoryOccurrence, MemoryEntry } from "./vectorstore";
+import { HybridRetriever } from "./retriever";
+import { WorldbookManager } from "./worldbook";
+export { INJECTION_HEADER, INJECTION_PREAMBLE } from "./worldbook-constants";
+import { chunkText } from "./chunk";
+import { feedEntityNamesToJieba } from "../memory/entity-graph";
+import { isL2LocallyRecallable } from "../memory/memory-types";
+import type { DocumentImportControl } from "./file-ingest";
+import { ensureRerankerInitialized, getReranker } from "./reranker";
+
+// ── Global RAG instances ──
+let store: JsonVectorStore | null = null;
+let retriever: HybridRetriever | null = null;
+let worldbook: WorldbookManager | null = null;
+let provider: EmbeddingProvider | null = null;
+
+function getDataDir(): string {
+  return path.join(getUserDataDir(), "rag-data");
+}
+
+// ── Init ──
+export async function initRAG(
+  ragMode: "auto" | "local" | "cloud" = "auto",
+  cloudBaseUrl?: string,
+  cloudApiKey?: string,
+  embeddingModel?: string
+): Promise<void> {
+  const dataDir = getDataDir();
+  provider = getEmbeddingProvider(ragMode, cloudBaseUrl, cloudApiKey, embeddingModel);
+  store = new JsonVectorStore(dataDir);
+  // 只有 provider 存在时才创建 retriever（向量检索依赖 embedding）
+  if (provider) {
+    retriever = new HybridRetriever(store, provider);
+  }
+  worldbook = new WorldbookManager(
+    path.join(getAppRootDir(), "prompts", "worldbook"),
+    { stateFile: path.join(getUserDataDir(), "worldbook-state.json") }
+  );
+  await worldbook.loadFromDirectory();
+
+  // 把实体图谱中的已有实体名灌入 jieba 自定义词典
+  // 防止 "昔涟"、"小鹿" 等 AI 伴侣核心名词被错误切分
+  await feedEntityNamesToJieba();
+
+  console.log(
+    "[RAG] initialized. Mode:", ragMode,
+    "Provider:", provider?.name ?? "none",
+    "Dims:", provider?.dims ?? "N/A",
+    "Memories:", store.stats.total,
+    provider ? "" : " [Vector retrieval disabled]"
+  );
+}
+
+// ── Switch embedding model (hot-swap) ──
+export async function switchEmbeddingModel(modelKey: string): Promise<{ ok: boolean; clearedEntries: number; error?: string }> {
+  try {
+    // Switch the embedding pipeline first
+    switchModel(modelKey);
+    const newProvider = getEmbeddingProvider("auto", undefined, undefined, modelKey);
+
+    // 模型不存在时无法切换 — 输出详细诊断帮助排查"放到 models/ 却检测不到"
+    if (!newProvider) {
+      try {
+        // require to avoid circular import at module load
+        const { getModelInstallStatusDetail } = require("./model-status") as typeof import("./model-status");
+        const detail = getModelInstallStatusDetail("embedding", modelKey);
+        if (detail.existingProjectDir) {
+          // Project-side directory exists but is incomplete — explicit warning,
+          // do NOT silently fall back to HuggingFace cache.
+          console.error(
+            `[Cyrene] embedding model "${modelKey}" project directory exists but is incomplete.\n` +
+            `  existingProjectDir: ${detail.existingProjectDir}\n` +
+            `  requiredFiles:      ${JSON.stringify(detail.requiredFiles)}\n` +
+            `  missingFiles:       ${JSON.stringify(detail.missingFiles)}\n` +
+            `  HF cache fallback suppressed. Fix the files above, then retry.`,
+          );
+        } else {
+          console.error(
+            `[Cyrene] embedding model "${modelKey}" not detected anywhere.\n` +
+            `  modelDirCandidates: ${JSON.stringify(detail.modelDirCandidates)}\n` +
+            `  subPathCandidates:  ${JSON.stringify(detail.subPathCandidates)}\n` +
+            `  requiredFiles:      ${JSON.stringify(detail.requiredFiles)}\n` +
+            `  Drop the model files into one of the candidates above.`,
+          );
+        }
+      } catch (diagErr) {
+        console.error("[Cyrene] model diagnostic log failed:", diagErr);
+      }
+      return { ok: false, clearedEntries: 0, error: "Local embedding model not found. Cannot switch." };
+    }
+    
+    const newDims = newProvider.dims;
+
+    // Check existing entries for dimension mismatch
+    let clearedEntries = 0;
+    if (store) {
+      const entries = (store as any).entries as Array<{ embedding: number[] }> | undefined;
+      if (entries && entries.length > 0) {
+        const oldDims = entries[0].embedding.length;
+        if (oldDims !== newDims) {
+          // Dimension mismatch — clear the vector store
+          const dataDir = getDataDir();
+          const storePath = path.join(dataDir, "memory-store.json");
+          if (fs.existsSync(storePath)) {
+            clearedEntries = entries.length;
+            fs.writeFileSync(storePath, "[]", "utf8");
+            console.log("[RAG] dimension mismatch (" + oldDims + " → " + newDims + "), cleared " + clearedEntries + " entries");
+          }
+          // Reload store from the now-empty file
+          store = new JsonVectorStore(dataDir);
+        }
+      }
+    }
+
+    // Update provider reference and retriever
+    provider = newProvider;
+    if (store) {
+      retriever = new HybridRetriever(store, provider);
+    }
+
+    console.log("[RAG] switched embedding model to", modelKey, "dims:", newDims, "cleared:", clearedEntries);
+    return { ok: true, clearedEntries };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[RAG] switch embedding model failed:", message);
+    return { ok: false, clearedEntries: 0, error: message };
+  }
+}
+
+// ── Memory write ──
+export async function addMemory(
+  text: string,
+  source = "user_memory",
+  metadata?: Record<string, unknown>,
+  opts?: { createdAt?: number }
+): Promise<string> {
+  if (!store || !provider) throw new Error("RAG not initialized");
+  const entry = await store.add(text, source, provider, metadata, opts);
+  return entry.id;
+}
+
+export async function addHistoryMemory(
+  text: string,
+  occurrence: ChatHistoryOccurrence,
+  opts?: { createdAt?: number },
+): Promise<string> {
+  if (!store || !provider) throw new Error("RAG not initialized");
+  const entry = await store.addChatHistory(text, provider, occurrence, opts);
+  return entry.id;
+}
+
+export async function addL2MemoryVector(
+  text: string,
+  l2Id: string,
+  metadata?: Record<string, unknown>,
+  opts?: { createdAt?: number },
+): Promise<string> {
+  if (!store || !provider) throw new Error("RAG not initialized");
+  if (!l2Id.trim()) throw new Error("l2Id is required");
+  const entry = await store.addUnique(text, "user_memory", provider, { ...metadata, l2Id }, opts);
+  return entry.id;
+}
+
+// ── Memory search ──
+export async function searchMemory(
+  query: string,
+  source?: string,
+  topK = 5,
+  options?: { recordRecall?: boolean }
+): Promise<string[]> {
+  const results = await searchMemoryEntries(query, source, topK, options);
+  return results.map((r) => r.text);
+}
+
+export async function searchMemoryEntries(
+  query: string,
+  source?: string,
+  topK = 5,
+  options?: { recordRecall?: boolean }
+): Promise<Array<{ id: string; text: string; createdAt: number; score: number; metadata?: Record<string, unknown> }>> {
+  if (!retriever) return [];
+  let allowedEntryIds: string[] | undefined;
+  let userMemorySearchTextByEntryId: Map<string, string> | undefined;
+  if (source === "user_memory") {
+    try {
+      const { memoryStore } = await import("../memory/memory-store");
+      const memories = await memoryStore.getAllL2();
+      const recallableById = new Map(
+        memories.filter(isL2LocallyRecallable).map((memory) => [memory.id, memory]),
+      );
+      const recallableEntries = getEntriesBySource("user_memory")
+        .filter((entry) => {
+          const l2Id = entry.metadata?.l2Id;
+          if (typeof l2Id !== "string") return false;
+          return recallableById.get(l2Id)?.ragId === entry.id;
+        });
+      allowedEntryIds = recallableEntries.map((entry) => entry.id);
+      userMemorySearchTextByEntryId = new Map(recallableEntries.map((entry) => {
+        const l2Id = entry.metadata?.l2Id;
+        const memory = typeof l2Id === "string" ? recallableById.get(l2Id) : undefined;
+        const searchText = memory?.triggerText.trim()
+          ? `${memory.content}\n${memory.triggerText}`
+          : memory?.content ?? entry.text;
+        return [entry.id, searchText];
+      }));
+    } catch (err) {
+      console.warn("[RAG] failed to resolve recallable user memories:", err);
+      return [];
+    }
+  }
+  const finalTopK = source === "user_memory" ? Math.min(Math.max(topK, 0), 5) : topK;
+  const candidateTopK = source === "user_memory" ? Math.max(20, finalTopK) : finalTopK;
+  let results = await retriever.retrieve(query, source, candidateTopK, {
+    allowedEntryIds,
+    searchTextByEntryId: userMemorySearchTextByEntryId,
+    rawScore: source === "user_memory",
+    recordRecall: source === "user_memory" ? false : options?.recordRecall,
+  });
+  if (source === "user_memory") {
+    const lexicalCandidates = (await retriever.retrieve(query, source, 5, {
+      allowedEntryIds,
+      searchTextByEntryId: userMemorySearchTextByEntryId,
+      bm25Only: true,
+      recordRecall: false,
+    })).filter((result) => result.score > 0);
+    const candidateIds = new Set(results.map((result) => result.entry.id));
+    for (const lexicalCandidate of lexicalCandidates) {
+      if (candidateIds.has(lexicalCandidate.entry.id)) continue;
+      if (results.length >= candidateTopK) {
+        const removed = results.pop();
+        if (removed) candidateIds.delete(removed.entry.id);
+      }
+      results.push(lexicalCandidate);
+      candidateIds.add(lexicalCandidate.entry.id);
+    }
+    try {
+      await ensureRerankerInitialized();
+    } catch (error) {
+      console.warn("[RAG] lazy reranker initialization failed; using hybrid ranking:", error);
+    }
+    const reranker = getReranker();
+    let rerankApplied = false;
+    if (reranker && results.length > 0) {
+      try {
+        const documents = results.map((result) =>
+          userMemorySearchTextByEntryId?.get(result.entry.id) ?? result.entry.text
+        );
+        const reranked = await reranker.rerank(query, documents);
+        const candidatesByText = new Map<string, typeof results>();
+        results.forEach((result, index) => {
+          const text = documents[index];
+          const matches = candidatesByText.get(text) ?? [];
+          matches.push(result);
+          candidatesByText.set(text, matches);
+        });
+        const rerankedResults = reranked.flatMap((item) => {
+          const matches = candidatesByText.get(item.text);
+          const match = matches?.shift();
+          return match ? [{ ...match, score: item.score }] : [];
+        });
+        const unmatchedResults = Array.from(candidatesByText.values()).flat();
+        results = [...rerankedResults, ...unmatchedResults];
+        rerankApplied = true;
+      } catch (error) {
+        console.warn("[RAG] user memory rerank failed; using hybrid ranking:", error);
+      }
+    }
+    if (!rerankApplied && lexicalCandidates[0]) {
+      const lexicalIndex = results.findIndex((result) => result.entry.id === lexicalCandidates[0].entry.id);
+      if (lexicalIndex > 0) results.unshift(...results.splice(lexicalIndex, 1));
+    }
+    results = results.slice(0, finalTopK);
+  }
+  if (options?.recordRecall !== false) {
+    await recordUserMemoryRecalls(results);
+  }
+  return results.map((r) => ({
+    id: r.entry.id,
+    text: r.entry.text,
+    createdAt: r.entry.createdAt,
+    score: r.score,
+    metadata: r.entry.metadata,
+  }));
+}
+
+async function recordUserMemoryRecalls(results: Array<{ entry: MemoryEntry }>): Promise<void> {
+  const l2Ids = results
+    .filter((r) => r.entry.source === "user_memory")
+    .map((r) => r.entry.metadata?.l2Id)
+    .filter((id): id is string => typeof id === "string" && id.length > 0);
+  if (l2Ids.length === 0) return;
+  try {
+    const { memoryStore } = await import("../memory/memory-store");
+    for (const l2Id of new Set(l2Ids)) {
+      await memoryStore.updateL2RecallStats(l2Id, 1);
+    }
+  } catch (err) {
+    console.warn("[RAG] failed to record user memory recall:", err);
+  }
+}
+
+// ── History search with metadata（供 recall_history 工具用）──
+// 跟 searchMemory 的区别：返回完整 entry（含 createdAt / metadata），
+// 让召回工具能按时间排序、展示时间戳。
+export async function searchHistoryEntries(
+  query: string,
+  topK = 5,
+  options: {
+    recordRecall?: boolean;
+    createdAfter?: number;
+    rawScore?: boolean;
+    semanticOnly?: boolean;
+    bm25Only?: boolean;
+  } = {},
+): Promise<Array<{ text: string; createdAt: number; score: number; metadata?: Record<string, unknown> }>> {
+  if (!retriever) return [];
+  const results = await retriever.retrieve(query, "chat_history", topK, options);
+  return results.map((r) => {
+    const occurrences = Array.isArray(r.entry.metadata?.occurrences)
+      ? r.entry.metadata.occurrences.filter((item): item is ChatHistoryOccurrence => (
+        Boolean(item) && typeof item === "object"
+        && typeof (item as ChatHistoryOccurrence).sessionId === "string"
+        && ((item as ChatHistoryOccurrence).role === "user" || (item as ChatHistoryOccurrence).role === "assistant")
+        && typeof (item as ChatHistoryOccurrence).ts === "number"
+      ))
+      : [];
+    const latest = occurrences.reduce<ChatHistoryOccurrence | undefined>(
+      (best, item) => !best || item.ts >= best.ts ? item : best,
+      undefined,
+    );
+    return {
+      text: r.entry.text,
+      createdAt: latest?.ts ?? r.entry.createdAt,
+      score: r.score,
+      metadata: latest ? { ...r.entry.metadata, ...latest } : r.entry.metadata,
+    };
+  });
+}
+
+// ── Worldbook DMAE：每轮打分（本轮用户输入 + 上轮模型回复）──
+export function updateWorldbookActivation(userText: string, modelText: string): void {
+  if (!worldbook) return;
+  worldbook.updateActivation(userText, modelText);
+}
+
+// ── Worldbook DMAE：取 Active 条目内容（阈值门控 + 注入）──
+export function getActiveWorldbookEntries(): string[] {
+  if (!worldbook) return [];
+  return worldbook.getActiveEntries();
+}
+
+// ── Worldbook One-Shot：取本轮 cascade 触发的条目（不入 DMAE 状态表）──
+// 返回带条目标题的完整内容（与 getActiveWorldbookEntries 一致格式，便于合并注入）
+export function getCascadeWorldbookEntries(): string[] {
+  if (!worldbook) return [];
+  return worldbook.getCascadeEntries().map(e => {
+    const title = e.id.replace(/^wb_[^_]+_/, "").replace(/_/g, " ");
+    return `【${title}】\n${e.content}`;
+  });
+}
+
+// ── Get permanent worldbook entries ──
+export function getPermanentWorldbookEntries(): string[] {
+  if (!worldbook) return [];
+  return worldbook.getPermanentEntries();
+}
+
+// ── Import document ──
+export type ImportedDocumentResult = {
+  importId: string;
+  chunkCount: number;
+};
+
+export type ImportedDocumentChunk = {
+  text: string;
+  score: number;
+  fileName?: string;
+  chunkIndex?: number;
+  importId?: string;
+};
+
+export type PreparedDocumentEmbedding = {
+  text: string;
+  chunkIndex: number;
+  embedding: number[];
+};
+
+export async function appendPreparedDocumentBatch(
+  fileName: string,
+  importId: string,
+  prepared: PreparedDocumentEmbedding[],
+): Promise<void> {
+  if (!store) throw new Error("RAG not initialized");
+  store.addPreparedBatch(prepared.map((entry) => ({
+    text: entry.text,
+    embedding: entry.embedding,
+    source: "imported_doc",
+    metadata: { fileName, chunkIndex: entry.chunkIndex, importId },
+  })));
+}
+
+export async function importPreparedDocumentForTurn(
+  fileName: string,
+  prepared: PreparedDocumentEmbedding[],
+): Promise<ImportedDocumentResult> {
+  if (!store) throw new Error("RAG not initialized");
+  const id = typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2, 8);
+  const importId = `import-${Date.now()}-${id}`;
+  await appendPreparedDocumentBatch(fileName, importId, prepared);
+  return { importId, chunkCount: prepared.length };
+}
+
+export async function importDocumentForTurn(
+  text: string,
+  fileName: string,
+  control?: DocumentImportControl,
+): Promise<ImportedDocumentResult> {
+  if (!store || !provider) throw new Error("RAG not initialized");
+  const chunks = chunkText(text, "doc_" + fileName);
+  control?.onProgress?.({ status: "chunking", completedChunks: chunks.length, totalChunks: chunks.length });
+  if (control?.isCancelled?.()) throw new Error("cancelled");
+  const id = typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2, 8);
+  const importId = `import-${Date.now()}-${id}`;
+  control?.onProgress?.({ status: "embedding", completedChunks: 0, totalChunks: chunks.length });
+  await store.addBatch(
+    chunks.map((c) => ({ text: c.text, source: "imported_doc", metadata: { fileName, chunkIndex: c.index, importId } })),
+    provider,
+    { isCancelled: control?.isCancelled },
+  );
+  return { importId, chunkCount: chunks.length };
+}
+
+export async function importDocument(text: string, fileName: string): Promise<number> {
+  const result = await importDocumentForTurn(text, fileName);
+  return result.chunkCount;
+}
+
+export async function searchImportedDocumentChunksForImportIds(
+  query: string,
+  importIds: string[],
+  topK = 6,
+): Promise<ImportedDocumentChunk[]> {
+  if (!retriever || !query.trim() || importIds.length === 0) return [];
+  const results = await retriever.retrieve(query, "imported_doc", topK, { importIds });
+  return results.map((result) => ({
+    text: result.entry.text,
+    score: result.score,
+    fileName: typeof result.entry.metadata?.fileName === "string" ? result.entry.metadata.fileName : undefined,
+    chunkIndex: typeof result.entry.metadata?.chunkIndex === "number" ? result.entry.metadata.chunkIndex : undefined,
+    importId: typeof result.entry.metadata?.importId === "string" ? result.entry.metadata.importId : undefined,
+  }));
+}
+
+// ── Build memory context (legacy, kept for compatibility) ──
+// 注意：单参签名无 modelText，故 model 奖励不触发（降级行为）。
+// 主流程已改用 orchestrator 的 buildAlwaysOnContext（会传上轮模型回复）。
+export async function buildMemoryContext(userInput: string): Promise<string> {
+  const parts: string[] = [];
+
+  // 1. Worldbook（DMAE：打分 + 取 Active）
+  updateWorldbookActivation(userInput, "");
+  const wbResults = getActiveWorldbookEntries();
+  if (wbResults.length > 0) {
+    parts.push("\u3010\u76f8\u5173\u80cc\u666f\u3011\n" + wbResults.join("\n\n"));
+  }
+
+  // 2. Imported docs
+  const docResults = await searchMemory(userInput, "imported_doc", 5);
+  if (docResults.length > 0) {
+    parts.push("\u3010\u76f8\u5173\u6587\u4ef6\u7247\u6bb5\u3011\n" + docResults.map((m) => "- " + m).join("\n"));
+  }
+
+  // 3. User memory
+  const memResults = await searchMemory(userInput, "user_memory", 3);
+  if (memResults.length > 0) {
+    parts.push("\u3010\u5173\u4e8e\u7528\u6237\u7684\u8bb0\u5fc6\u3011\n" + memResults.map((m) => "- " + m).join("\n"));
+  }
+
+  return parts.join("\n\n");
+}
+
+// ── Reset ──
+export function resetRAG(): void {
+  store?.flushSync();
+  store = null;
+  retriever = null;
+  worldbook = null;
+  provider = null;
+  resetEmbeddingProvider();
+}
+
+/** 同步 flush 向量库的防抖写盘（before-quit / reset 调用，防丢最后一次写）。 */
+export function flushVectorStoreSync(): void {
+  store?.flushSync();
+}
+
+export function getRAGStats() {
+  return store?.stats ?? { total: 0, sources: {} };
+}
+
+export function isUserMemoryVectorStoreReady(): boolean {
+  return store !== null && provider !== null;
+}
+
+/**
+ * 获取指定 source 的所有向量条目（含 embedding），用于记忆压缩 / 聚类。
+ * 返回浅拷贝，调用方不应修改返回的 embedding。
+ */
+export function getEntriesBySource(source: string): Array<{ id: string; text: string; embedding: number[]; createdAt: number; weight: number; metadata?: Record<string, unknown> }> {
+  if (!store) return [];
+  return ((store as any).entries as MemoryEntry[])
+    .filter((e) => e.source === source)
+    .map((e) => ({ id: e.id, text: e.text, embedding: e.embedding, createdAt: e.createdAt, weight: e.weight, metadata: e.metadata }));
+}
+
+export function deleteUserMemoryVectors(ragIds: string[]): number {
+  if (!store) throw new Error("RAG not initialized");
+  return store.deleteEntriesByIds(ragIds, "user_memory");
+}
+
+/** 单轮删除级联：移除对应 occurrence；仅在无剩余 occurrence 时删除 chat_history 向量。 */
+export function deleteHistoryEntriesByTurnIds(turnIds: string[]): number {
+  if (!store) throw new Error("RAG not initialized");
+  return store.deleteChatHistoryOccurrencesByTurnIds(turnIds);
+}
+
+export function deleteHistoryEntriesBySessionId(sessionId: string): number {
+  if (!store) throw new Error("RAG not initialized");
+  return store.deleteChatHistoryOccurrencesBySessionId(sessionId);
+}
+
+export function deleteImportedDoc(importId: string, fileName?: string): number {
+  if (!store) throw new Error("RAG not initialized");
+  return store.deleteImportedDoc(importId, fileName);
+}
+
+export function hasImportedDocumentChunks(importId: string): boolean {
+  return store?.hasImportedDocumentChunks(importId) ?? false;
+}

@@ -1,0 +1,40 @@
+{
+  "id": "demo-window",
+  "name": "独立窗口示例插件",
+  "description": "window 模式示例：声明独立窗口 UI，插件自带 HTML 页面，通过 window.cyrenePlugin 桥读取配置、调用自己的工具。",
+  "version": "1.0.0",
+  "entry": "index.js",
+  "icon": "icon.png",
+  "defaultEnabled": true,
+  "risk": ["safe"],
+  "settingsSchema": [
+    {
+      "key": "theme",
+      "type": "select",
+      "label": "窗口主题",
+      "default": "aurora",
+      "options": [
+        { "value": "aurora", "label": "极光粉紫" },
+        { "value": "night", "label": "深夜蓝" }
+      ]
+    },
+    {
+      "key": "signature",
+      "type": "text",
+      "label": "窗口签名",
+      "default": "来自昔涟的插件窗口",
+      "placeholder": "显示在窗口底部的一句话"
+    }
+  ],
+  "ui": {
+    "mode": "window",
+    "entry": "window/index.html",
+    "window": {
+      "width": 480,
+      "height": 420,
+      "title": "独立窗口示例",
+      "resizable": true,
+      "policy": "reuse"
+    }
+  }
+}

@@ -1,0 +1,4 @@
+FROM deepseek-r1-large:7b
+PARAMETER num_ctx 32768
+FROM deepseek-r1:7b
+PARAMETER num_ctx 32768
