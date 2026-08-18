@@ -45,8 +45,14 @@ artwork, story content, and trademarks are the intellectual property of
 | --- | --- |
 | 🪟 Live2D pet / multi-window / expression interaction | ✅ Stable |
 | 💬 Daily chat / voice call / multi-chat history / stickers | ✅ Stable |
+| 💼 Work mode (Router→Plan→ActionGate) | ✅ Stable |
+| 💻 Code collaboration (Git panel / LSP / diff cards) | 🧪 Experimental |
+| 🖼 Screenshot assistant (native Rust, hotkey → insert into chat) | ✅ Stable |
+| ⌨️ CLI (`cyrene` command-line entry) | 🧪 Experimental |
 | 🧠 Memory system (L0/L1/L2 + custom DMAE Worldbook engine) | ✅ Stable |
+| 🌙 Memory "Dream" (idle-time triage / distillation, off by default) | 🧪 Experimental |
 | 🔊 TTS / ASR / document generation / web search / file ops | ✅ Stable (some need config) |
+| 🧩 Plugin system (directory-as-plugin, Currency Wars bundled in installer) | 🧪 Experimental |
 | 💼 Lark / Feishu long-connection | 🧪 Experimental |
 | 💬 WeChat iLink Bot | 🧪 Experimental |
 | 🤖 Game Bot automation | 🧪 Experimental |
@@ -70,6 +76,11 @@ artwork, story content, and trademarks are the intellectual property of
   Win32 APIs)
 - macOS / Linux may run, but desktop integration is only fully tested on
   Windows
+- **Installer users do NOT need Rust**: the screenshot assistant
+  (`cyrene-screenshot`) is written in Rust, but the release ships a
+  prebuilt `resources/bin/cyrene-screenshot.exe` — it works out of the box.
+  A Rust toolchain is only required if you rebuild it from source
+  (`npm run build:screenshot-helper`).
 
 ### 1. Clone the repository
 
@@ -274,6 +285,15 @@ provided in a future release. For now, the "Off" mode works fine.
 - **Conflict detection & resolution** — Lexical candidates → RAG recall →
   scoring → resolver; resolution types cover unrelated / context_difference
   / preference_evolution / direct_conflict.
+- **Memory judge & compressor** — LLM-based candidate judging and history
+  compression gate memories before they enter the store.
+- **🌙 Memory "Dream"** — Auto-triggers after ≥15 min idle and ≥24 h since
+  the last dream: ① triage/slim-down (local scoring demotion, hard caps
+  active 300 / total 800) ② pre-forgetting distillation (demoted entries
+  become first-person narrative patches that never decay) ③ merge
+  distillation (vector clustering of the aging layer, similar entries
+  merged into summaries). Runs on a serial LLM queue (never competes with
+  chat), aborts instantly when you return; off by default.
 - **🧬 Custom DMAE Worldbook engine** — Markdown entry format (trigger
   words / pinned / priority / intrinsic value / linked triggers);
   activation formula `Ru = Bu × (1 + γ·ln(1+U_old))`; Active / Dormant /
@@ -292,10 +312,35 @@ provided in a future release. For now, the "Off" mode works fine.
 - **Web search / fetch** — `web_search` + `fetch_url` (turndown
   HTML→Markdown).
 - **File ops** — `read_file` / `list_dir` / `write_file` / `read_image`.
+- **Git code tools** — `git_status` / `git_diff` / `git_log` etc.; the
+  agent can inspect workspace changes and commit history inside Code
+  sessions (restricted to trusted directories).
+- **LSP code intelligence** — `lsp_query` talks to language servers:
+  go-to-definition, find-references, hover, document symbols, diagnostics
+  (bring your own language server).
+- **Mutation evidence cards** — File-writing tools (apply_patch /
+  str_replace / write_file ...) return bounded "file +x/-y" diff cards
+  instead of raw script noise.
 - **Life utilities** — Expense ledger, exchange rate, translate, trip
   planning, unified diff apply.
 - **Task delegation** — `delegate_task` (sub-agent), `todo_write`
   checklist, `ask_user_choice` user choice cards.
+
+#### 🖼 Screenshot Assistant
+- **Native Rust implementation** — `native/cyrene-screenshot` (DXGI / GDI
+  dual capture paths + region selection + clipboard write); the prebuilt
+  exe ships with the installer, no Rust required from users.
+- **Global hotkey** — Default `Alt+Shift+S` (rebindable in settings);
+  hotkey captures go to the clipboard. The chat window also has a capture
+  button with preview-then-insert into the conversation.
+- **Lifecycle management** — The main process spawns / prewarms / recycles
+  the helper on demand with automatic recovery.
+
+#### ⌨️ CLI
+- **`cyrene` command-line entry** — Built via `npm run build:cli`;
+  supports `hello` / `about` / `version` / `help` / `run` (launches
+  Electron from a project directory); `doctor` / `init` / `update` are
+  reserved placeholders.
 
 <details>
 <summary><b>🧩 Advanced Features</b> (click to expand)</summary>
@@ -387,7 +432,10 @@ provided in a future release. For now, the "Off" mode works fine.
 | Renderer | Vite 5 + TypeScript 5 + Pixi.js 7 |
 | Live2D | `pixi-live2d-display` 0.5.0-beta + Cubism Core |
 | AI / MCP | `@modelcontextprotocol/sdk`, `@ag-ui/core`, `@ag-ui/client` |
+| Code collaboration | `simple-git` (Git panel/tools) + LSP (`vscode-jsonrpc` language servers) |
+| Native tooling | Rust (`native/cyrene-screenshot`, prebuilt exe shipped with the installer) |
 | Integrations | Lark OpenAPI, WeChat iLink, Nodemailer, PDFKit, docx |
+| CLI | esbuild single-file bundle (`scripts/build/cli.mjs`) |
 | Testing | Vitest 4 |
 
 ---
@@ -395,6 +443,17 @@ provided in a future release. For now, the "Off" mode works fine.
 ## 📦 Project Structure
 
 ```
+native/                # Native executable sources
+└── cyrene-screenshot/ # Rust screenshot helper (prebuilt resources/bin/*.exe ships in the installer)
+
+resources/bin/         # Prebuilt screenshot helper (electron-builder extraResources)
+
+plugins/               # Bundled plugins (scanned at runtime; only currency-wars ships in the installer)
+├── currency-wars/     # Currency Wars automation
+├── demo-window/       # Plugin window sample (source repo only)
+├── hello-settings/    # Settings-entry sample (source repo only)
+└── warp-record-url/   # Star Rail warp record extractor (source repo only)
+
 models/                # Local AI models (user-provided, see docs/local-models.md)
 ├── Xenova/
 │   ├── bge-m3/       # Embedding model (sticker matching + scene detection, ~570MB)
@@ -406,28 +465,36 @@ models/                # Local AI models (user-provided, see docs/local-models.m
 └── ms-marco-MiniLM-L-6-v2/  # Lightweight reranker (~23MB, optional)
 
 src/
+├── cli/              # cyrene CLI entry (esbuild single-file bundle)
 ├── main/             # Electron main process
 │   ├── asr/          # Automatic speech recognition (Aliyun + local sidecar)
 │   ├── call/         # Voice call core logic
 │   ├── channels/     # External channel adapters (Lark / WeChat iLink / ...)
 │   ├── chats/        # Multi-chat history and persistence
+│   ├── code-git/     # Git service (simple-git + workspace watcher + executable discovery)
 │   ├── embedding-manager.ts  # Local embedding model lifecycle
 │   ├── game-bot/     # Game automation (driven by game-recipes)
-│   ├── memory/       # L0/L1/L2 memory engine
+│   ├── lsp/          # LSP client / manager / server catalog & discovery
+│   ├── memory/       # L0/L1/L2 memory engine + judge/compressor + dream distillation
 │   ├── opener/       # Launcher / tray / single-instance
-│   ├── orchestrator/ # Agent main loop + tool dispatch
-│   ├── rag/          # Retrieval-augmented generation + worldbook injection
+│   ├── orchestrator/ # Agent main loop + tool dispatch (incl. git/lsp tools & evidence cards)
+│   ├── plugins/      # Plugin framework (scan / load / tool registry / window host)
+│   ├── rag/          # Retrieval-augmented generation + worldbook injection + ONNX session policy
 │   ├── relationship/ # User relationship profile
 │   ├── scheduler/    # Scheduled tasks (reminders / agenda)
+│   ├── screenshot/   # Screenshot helper host (hotkey / process lifecycle / chat insertion)
 │   ├── sim/          # Scenario simulation harness
 │   ├── skills/       # Agent skill system
 │   ├── sticker-*.ts  # Sticker semantic matching (protocol / storage / desc / embedder)
-│   └── tts/          # Text-to-speech (multi-engine)
+│   ├── sync/         # Message sync (spawns client/ + message merging)
+│   ├── tts/          # Text-to-speech (multi-engine)
+│   └── work/         # Work mode (Router→Plan→ActionGate + ask cards)
 ├── preload/          # Electron preload bridges (IPC exposure)
 ├── renderer/         # Vite renderer
 │   ├── call/         # Voice call window
 │   ├── chat/         # Main chat UI
 │   ├── live2d/       # Live2D model rendering logic
+│   ├── plugins/      # Plugin manager window
 │   ├── public/       # Static assets (audio / avatars / Cubism Core / stickers)
 │   ├── settings/     # Settings center
 │   ├── sidebar/      # Sidebar

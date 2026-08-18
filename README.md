@@ -21,13 +21,16 @@
 - 🪟 **Live2D 桌宠** — 置顶陪伴，情感同步
 - 💬 **AI 对话** — 多会话历史，人格风格切换
 - 💼 **Work 模式** — Router→Plan→ActionGate 完整 Agent 工作流
-- 🧠 **记忆引擎** — L0/L1/L2 + 自研 DMAE Worldbook
+- 💻 **Code 协作** — Git 状态面板 + LSP 代码智能 + 工具改动 Diff 卡片
+- 🧠 **记忆引擎** — L0/L1/L2 + 自研 DMAE Worldbook + 空闲期「梦境」记忆蒸馏
 - 🔊 **语音通话** — TTS + ASR，解放双手
 - 🖥️ **屏幕监控** — VLM 分析屏幕活动，主动消息智能判断是否打扰
-- 🛠 **工具生态** — 文档生成、联网搜索、文件操作
+- 🖼 **截图助手** — 原生 Rust 截图工具，全局快捷键截图直接插入对话
+- 🛠 **工具生态** — 文档生成、联网搜索、文件操作、Git / LSP 代码工具
+- ⌨️ **CLI** — `cyrene` 命令行入口
 - 📱 **多平台接入** — 飞书、微信 iLink
 - 🔄 **消息同步** — 自建同步服务器，跨设备聊天记录增量同步
-- 🧩 **插件生态** — 目录即插件，第三方开放扩展，内置货币战争
+- 🧩 **插件生态** — 目录即插件，第三方开放扩展，发行版内置货币战争
 - 🌙 **主动聊天** — 路由可控 + 多渠道投递
 
 ---
@@ -38,6 +41,9 @@
 - 从源码构建需要 **Node.js 24 LTS**（`npm install` / `npm run build` 依赖此版本）
 - npm 10+（推荐 11）
 - Windows 10/11（飞书 / 微信 / nut-js 键鼠自动化依赖 Win32 API）
+- **安装包用户无需安装 Rust**：截图助手（`cyrene-screenshot`）由 Rust 编写，
+  但发行版随包附带预编译好的 `resources/bin/cyrene-screenshot.exe`，开箱即用。
+  仅当你需要从源码重新编译它时（`npm run build:screenshot-helper`），才需要 Rust 工具链。
 
 ### 首次使用 Checklist
 
@@ -220,9 +226,13 @@ call 窗口**没有文本输入框**或 PTT（Push-To-Talk）按钮，所有对�
 | 🪟 桌宠 / 多窗口 / 表情互动 | ✅ 可用 |
 | 💬 日常聊天 / 语音通话 / 多会话历史 / 贴纸 | ✅ 可用 |
 | 💼 Work 模式（Router→Plan→ActionGate） | ✅ 可用 |
+| 💻 Code 协作（Git 面板 / LSP / Diff 卡片） | 🧪 实验性 |
+| 🖼 截图助手（原生 Rust，快捷键截图插入对话） | ✅ 可用 |
+| ⌨️ CLI（`cyrene` 命令行入口） | 🧪 实验性 |
 | 🖥️ 屏幕监控（VLM 分析 + proactive 注入） | 🧪 实验性 |
 | 💬 社交上下文（对话连续性缓存） | 🧪 实验性 |
 | 🧠 记忆系统（L0/L1/L2 + 自研 DMAE Worldbook 引擎） | ✅ 可用 |
+| 🌙 记忆「梦境」（空闲期体检/沉淀/蒸馏，默认关闭） | 🧪 实验性 |
 | 🔊 TTS / ASR / 文档生成 / 联网搜索 / 文件操作 | ✅ 可用（部分需配置） |
 | 📱 飞书 Lark 长连接 | 🧪 实验性 |
 | 📱 微信 iLink Bot | 🧪 实验性 |
@@ -271,6 +281,13 @@ call 窗口**没有文本输入框**或 PTT（Push-To-Talk）按钮，所有对�
   权重自动衰减（60/30/10 阈值 active/aging/archived）。
 - **冲突检测与解决** — 词法候选 → RAG 召回 → 评分 → resolver，
   解决类型覆盖无关/语境差异/偏好演变/直接冲突。
+- **记忆裁判与压缩** — LLM 记忆候选判定（judge）与历史对话压缩
+  （compressor），入库前先过质量门槛。
+- **🌙 记忆「梦境」** — 空闲 ≥15 分钟且距上次做梦 ≥24 小时自动触发：
+  ① 体检瘦身（本地评分降级，active 300 / 总库 800 硬上限）
+  ② 遗忘前沉淀（被降级条目蒸馏成永不衰减的第一人称叙事补丁）
+  ③ 蒸馏合并（aging 层向量聚类，相似条目合并成总结）；
+  全部走 LLM 串行队列不挤主聊天，用户回来立即中止，默认关闭。
 - **🧬 自研 DMAE Worldbook 引擎** — 词条格式（触发词/常驻/优先级/
   内在价值/连带触发词），`Ru = Bu × (1 + γ·ln(1+U_old))` 激活公式，
   Active / Dormant / Archived 三态状态机，One-Shot 连带触发。
@@ -286,11 +303,29 @@ call 窗口**没有文本输入框**或 PTT（Push-To-Talk）按钮，所有对�
   Markdown。
 - **联网搜索 / 网页抓取** — `web_search` + `fetch_url`（turndown 转 Markdown）。
 - **文件操作** — `read_file` / `list_dir` / `write_file` / `read_image`。
+- **Git 代码工具** — `git_status` / `git_diff` / `git_log` 等，Agent 在
+  Code 会话里可直接查看工作区变更与提交历史（信任目录白名单限制）。
+- **LSP 代码智能** — `lsp_query` 工具对接语言服务器：跳转定义、查找引用、
+  悬停信息、文档符号、诊断错误等（需自行安装对应语言服务器）。
+- **改动证据卡片** — 写文件类工具（apply_patch / str_replace / write_file 等）
+  返回前附带「文件 +x/-y」 Diff 卡片，diff 有界截断防上下文爆炸。
 - **生活小工具** — 记账、汇率、翻译、行程规划、unified diff 应用。
 - **任务委派** — `delegate_task`（sub-agent）、`todo_write`（任务清单）、
   `ask_user_choice`（用户选择卡片）。
 - **屏幕观察** — `get_screen_observation` 工具让 LLM 按需截图并用视觉模型
   分析用户屏幕活动，30 秒缓存复用，敏感信息模糊化。
+
+#### 🖼 截图助手
+- **原生 Rust 实现** — `native/cyrene-screenshot`（DXGI / GDI 双通路截图 +
+  框选区域 + 剪贴板写入），预编译 exe 随安装包分发，无需用户安装 Rust。
+- **全局快捷键** — 默认 `Alt+Shift+S`（可在设置里改键/录制新键），
+  快捷键截图走剪贴板；聊天窗口另有截图按钮，截完预览确认后直接插入对话。
+- **生命周期托管** — 主进程按需拉起/预热/回收子进程，异常自恢复。
+
+#### ⌨️ CLI
+- **`cyrene` 命令行入口** — `npm run build:cli` 产出，支持
+  `hello` / `about` / `version` / `help` / `run`（从项目目录拉起 Electron），
+  `doctor` / `init` / `update` 已占位待实现。
 
 #### 🧩 插件系统
 - **插件包 = 目录**：`plugins/` 下放 `plugin.json`（清单）+ `index.js`（逻辑），
@@ -303,8 +338,12 @@ call 窗口**没有文本输入框**或 PTT（Push-To-Talk）按钮，所有对�
 - **双扫描根目录**：`appPath/plugins/` 内置随安装包分发；
   `userData/plugins/` 用户自行安装，按 id 覆盖内置版本。
 - **内置插件**：`currency-wars`（《崩坏：星穹铁道》货币战争自动运行：
-  窗口定位截图 + OCR/VLM 识别，按词条规则自动选祝福与投资，带独立控制台窗口）、
-  `demo-window`（插件窗口示例）、`hello-settings`（设置页入口示例）。
+  窗口定位截图 + OCR/VLM 识别，按词条规则自动选祝福与投资，带独立控制台窗口；
+  **发行安装包仅内置此插件**）；仓库另含 `demo-window`（插件窗口示例）、
+  `hello-settings`（设置页入口示例）、`warp-record-url`（星穹铁道跃迁记录
+  提取，仅源码仓库提供，不进安装包）供开发参考。
+- **插件管理窗口** — 独立的插件管理界面（`src/renderer/plugins/`），
+  集中查看已加载插件、开关与配置。
 - 开发契约详见 [docs/cyrene-plugin-api-spec.md](./docs/cyrene-plugin-api-spec.md)。
 
 #### 🔄 消息同步
@@ -366,9 +405,20 @@ call 窗口**没有文本输入框**或 PTT（Push-To-Talk）按钮，所有对�
 - **内嵌视图** —— Work/Code/Learn 三模式内嵌在 Chat 窗口（模式下拉切换），
   与聊天管线双轨并行、互不合并；会话按模式过滤、懒创建，Code/Learn 目录绑定可随时补。
 - **Router→Plan→ActionGate** —— 任务路由→计划生成→动作门控，完整 Agent 工作流。
+- **结构化询问卡片** —— ActionGate 需要用户拍板时下发 ask 卡片，
+  optionId + interactionId 双重校验防伪造回答。
 - **独立记忆** —— Work memory 与主聊天 memory 完全隔离，不交叉污染。
 - **工具过滤** —— 排除 recall_history / user_memory / delegate_task / ask_user_choice，
   只保留执行类工具。
+
+#### 💻 Code 协作
+- **Git 状态面板** —— Code 会话绑定目录后实时展示分支、待提交变更
+  （chokidar 监听 + simple-git），文件变更类型/重命名可追溯。
+- **LSP 代码智能** —— 内置 13 种语言服务器目录（typescript / pyright /
+  gopls / rust-analyzer / clangd / jdtls / omnisharp / intelephense /
+  ruby-lsp / kotlin / lua / vue / yaml），自动发现可执行文件，
+  支持用户覆盖配置；Agent 经 `lsp_query` 获得真实的跳转/引用/诊断能力。
+- **信任边界** —— Git 操作限受信目录上下文，未绑定目录的会话不启用。
 
 #### 🖥️ 屏幕监控
 - **后台状态机** —— 全速每 3 分钟截图+VLM 分析（结构化输出类型类目+连续性自判+一句概括）；两级低变化判定（主：工作/学习/日常/娱乐类型类目等值比较；次：VLM 对照上次观测自判延续/切换），低变化自动降频为每 8 分钟确认一次但不停转，检测到变化即恢复全速。
@@ -437,8 +487,11 @@ call 窗口**没有文本输入框**或 PTT（Push-To-Talk）按钮，所有对�
 | 渲染层 | Vite 5 + TypeScript 5 + Pixi.js 7 |
 | Live2D | `pixi-live2d-display` 0.5.0-beta + Cubism Core |
 | AI / MCP | `@modelcontextprotocol/sdk`, `@ag-ui/core`, `@ag-ui/client` |
+| 代码协作 | `simple-git`（Git 面板/工具）+ LSP（`vscode-jsonrpc` 对接语言服务器） |
+| 原生工具 | Rust（`native/cyrene-screenshot` 截图助手，预编译 exe 随包分发） |
 | 集成 | 飞书 OpenAPI、微信 iLink、Nodemailer、PDFKit、docx |
 | 消息同步 | Node.js 子项目（`client/`）+ sql.js + HTTP 轮询 |
+| CLI | esbuild 单文件打包（`scripts/build/cli.mjs`） |
 | 测试 | Vitest 4 |
 
 ---
@@ -457,9 +510,15 @@ client/                # 消息同步客户端（独立 Node.js 子项目，需�
 └── index.js           # 入口（与主进程 stdout 行协议通信）
 
 plugins/               # 内置插件包（运行时扫描加载，规范见 docs/）
-├── currency-wars/     # 货币战争
-├── demo-window/       # 插件窗口示例
-└── hello-settings/    # 设置页入口示例
+├── currency-wars/     # 货币战争（发行安装包唯一内置插件）
+├── demo-window/       # 插件窗口示例（仅源码仓库）
+├── hello-settings/    # 设置页入口示例（仅源码仓库）
+└── warp-record-url/   # 星穹铁道跃迁记录提取（仅源码仓库）
+
+native/                # 原生可执行文件源码
+└── cyrene-screenshot/ # Rust 截图助手（编译产物 resources/bin/*.exe 随安装包分发）
+
+resources/bin/         # 截图助手预编译产物（electron-builder extraResources）
 
 models/                # 本地 AI 模型（用户放置，见 docs/local-models.md）
 ├── Xenova/
@@ -472,35 +531,40 @@ models/                # 本地 AI 模型（用户放置，见 docs/local-models
 └── ms-marco-MiniLM-L-6-v2/  # 轻量排序模型（~23MB，可选）
 
 src/
+├── cli/              # cyrene 命令行入口（esbuild 单文件打包）
 ├── main/             # Electron 主进程
 │   ├── asr/          # 语音识别（阿里云 + 本地 ASR sidecar）
 │   ├── call/         # 语音通话核心逻辑
 │   ├── channels/     # 外部渠道适配层（飞书 / 微信 iLink / ...）
 │   ├── chats/        # 多会话历史与持久化
+│   ├── code-git/     # Git 服务（simple-git + 工作区监听 + 可执行文件发现）
 │   ├── embedding-manager.ts  # 本地 embedding 模型生命周期
 │   ├── game-bot/     # 游戏自动化（game-recipes 驱动）
-│   ├── memory/       # L0/L1/L2 记忆引擎
+│   ├── lsp/          # LSP 客户端/管理器/服务器目录与发现
+│   ├── memory/       # L0/L1/L2 记忆引擎 + judge/compressor + 梦境蒸馏
 │   ├── music/        # 背景音乐 / 音效
 │   ├── opener/       # 启动器 / 托盘 / 单实例
-│   ├── orchestrator/ # Agent 主循环 + 工具调度
+│   ├── orchestrator/ # Agent 主循环 + 工具调度（含 git/lsp 工具与改动证据）
 │   ├── plugins/      # 插件化框架（扫描 / 加载 / 工具注册 / 窗口宿主）
 │   ├── proactive/    # 主动聊天（路由 / 门控 / 投递）
-│   ├── rag/          # 检索增强生成 + worldbook 注入
+│   ├── rag/          # 检索增强生成 + worldbook 注入 + ONNX 会话策略
 │   ├── relationship/ # 用户关系画像
 │   ├── scheduler/    # 定时任务（提醒 / 日程）
 │   ├── screen-monitor/ # 屏幕监控（截图+VLM分析+状态机）
+│   ├── screenshot/   # 截图助手宿主（快捷键 / 子进程生命周期 / 插入对话）
 │   ├── sim/          # 场景模拟工具
 │   ├── skills/       # Agent skill 系统
 │   ├── social-context/ # 社交上下文（对话连续性缓存）
 │   ├── sticker-*.ts  # 贴纸语义匹配（协议 / 存储 / 描述 / embedder）
 │   ├── sync/         # 消息同步主进程侧（spawn client/ + 消息合并）
 │   ├── tts/          # 语音合成（多引擎）
-│   └── work/         # Work 模式（Router→Plan→ActionGate）
+│   └── work/         # Work 模式（Router→Plan→ActionGate + ask 卡片）
 ├── preload/          # Electron preload 桥接
 ├── renderer/         # Vite 渲染层
 │   ├── call/         # 语音通话窗口
 │   ├── chat/         # 主聊天界面
 │   ├── live2d/       # Live2D 模型渲染逻辑
+│   ├── plugins/      # 插件管理窗口
 │   ├── public/       # 静态资源（音频 / 头像 / Cubism Core / 贴纸）
 │   ├── settings/     # 设置中心
 │   ├── sidebar/      # 侧边栏
