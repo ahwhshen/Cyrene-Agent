@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import * as fs from "fs";
 import type { WorkMessage, WorkPlan, WorkPlanStep, WorkRunEvent, WorkSession } from "../../shared/work-types";
+import type { WorkAskCardPayload, WorkAskSubmission } from "../../shared/work-ask-types";
 import { checkPermission, type ToolRiskLevel } from "../permission";
 import type { ToolContext } from "../orchestrator/tool-context";
 import type { ToolDefinition } from "../orchestrator/tool-registry";
@@ -11,7 +12,13 @@ import { WorkExecutionLedger, type WorkExecutionOutcome } from "./work-execution
 import { workContextRefs } from "./work-context-ref";
 import { buildWorkFinalSystemPrompt } from "./work-final-prompt";
 import { validateWorkToolArguments } from "./work-tool-validator";
-import { appendWorkMessage, getWorkSession, updateWorkExecutionState } from "./work-store";
+import { appendWorkMessage, getWorkSession, updateWorkExecutionState, workSessionMode } from "./work-store";
+import {
+  newInteractionId,
+  parseWorkAskQuestions,
+  publishWorkAskCard,
+  resolveWorkAskSubmission,
+} from "./work-ask-card";
 
 interface WorkPrompts {
   system: string;
@@ -31,6 +38,12 @@ export interface WorkAgentInput {
   onEvent?: (event: WorkRunEvent) => void;
   signal?: AbortSignal;
   approvalWebContentsId?: number;
+  /**
+   * 结构化询问卡片往返（移植自上游 harness ask_user）：
+   * agent 发布卡片 payload，IPC 层阻塞等待渲染层作答，返回原始提交；
+   * 规范值解析留在 agent 侧（resolveWorkAskSubmission）。未注入时降级为文本暂停询问。
+   */
+  requestUserAnswer?: (payload: WorkAskCardPayload) => Promise<WorkAskSubmission>;
 }
 
 interface WorkRouteDecision {
@@ -44,6 +57,8 @@ interface WorkActionDecision {
   args: Record<string, unknown>;
   message: string | null;
   reason: string;
+  /** ask_user 时的结构化问题（1-3 题，单选/多选/自由填写），由 parseWorkAskQuestions 校验。 */
+  questions?: unknown;
 }
 
 interface ExecutedToolSummary {
@@ -55,6 +70,22 @@ interface ExecutedToolSummary {
 
 const MAX_DIRECT_ACTIONS = 6;
 const MAX_PLAN_STEPS = 8;
+/** 单轮运行最多弹几次询问卡片，防止模型反复 ask_user 空转；超限降级为文本暂停。 */
+const MAX_ASK_PER_RUN = 2;
+
+/** 等待渲染层作答期间响应取消（移植自上游 raceWithSignal 语义）。 */
+function raceWithAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(new Error("aborted"));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(new Error("aborted"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => { signal.removeEventListener("abort", onAbort); resolve(value); },
+      (error) => { signal.removeEventListener("abort", onAbort); reject(error); },
+    );
+  });
+}
 
 function assertObject(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("expected object");
@@ -92,6 +123,7 @@ function parseAction(value: unknown): WorkActionDecision {
       : {},
     message: typeof object.message === "string" ? object.message : null,
     reason: typeof object.reason === "string" ? object.reason : "",
+    ...(Array.isArray(object.questions) ? { questions: object.questions } : {}),
   };
 }
 
@@ -182,10 +214,17 @@ async function executeTool(input: {
     return { status: "failed", toolId: input.toolId, output: permission.reason || "Permission denied" };
   }
   try {
+    // Code 会话（mode="code" 且已绑目录）：注入 Code 工作区上下文，放行 git/LSP 工具（上游 Code 模式增强移植）
+    const codeSession = getWorkSession(input.sessionId);
+    const codeWorkspace =
+      codeSession && workSessionMode(codeSession) === "code" && codeSession.boundDir
+        ? codeSession.boundDir
+        : undefined;
     const context: ToolContext = {
       userQuery: input.userText,
       conversationId: `work:${input.sessionId}`,
       metadata: { runtime: "work" },
+      ...(codeWorkspace ? { mode: "code" as const, resolvedWorkspaceRoot: codeWorkspace } : {}),
     };
     const output = await tool.execute(input.args, tool.needsContext ? context : undefined);
     const contextRef = workContextRefs.register(input.sessionId, "tool_result", output);
@@ -224,17 +263,48 @@ function newPlan(route: WorkRouteDecision, userText: string, steps?: string[]): 
 }
 
 export async function runWorkAgent(input: WorkAgentInput): Promise<WorkSession> {
-  const adapter = getAdapterForConfig(input.config);
   const ledger = new WorkExecutionLedger();
   const memories = searchWorkMemory(input.userText, 6);
   const emit = input.onEvent ?? (() => {});
   const enabledTools = input.tools.filter((tool) => tool.enabled);
   const workHistory = buildDecisionHistory(input.session);
-  let session = input.session;
-  let route: WorkRouteDecision = { mode: "direct", reason: "router fallback" };
 
   emit({ type: "status", status: "running", text: "正在分析任务" });
-  session = updateWorkExecutionState(session.id, { status: "running" }) ?? session;
+  const session = updateWorkExecutionState(input.session.id, { status: "running" }) ?? input.session;
+
+  try {
+    await runWorkMain(input, session, ledger, memories, enabledTools, workHistory, emit);
+  } catch (error) {
+    if (input.signal?.aborted) throw error;
+    // 异常不再只写进侧边活动日志：同步落成一条可见的助手消息，
+    // 避免用户看到“发了消息却没有任何回应”。
+    const reason = error instanceof Error ? error.message : String(error);
+    console.error("[WorkAgent] run failed:", error);
+    const message = makeMessage(
+      "assistant",
+      `这一轮执行中断了，没能生成回复。原因：${reason}\n\n可以再发一次试试；如果是模型配置问题，请在 Work 模型设置里检查当前供应商的 API 是否可用。`,
+    );
+    appendWorkMessage(session.id, message);
+    updateWorkExecutionState(session.id, { status: "failed" });
+    emit({ type: "message", message });
+    emit({ type: "error", message: reason });
+    emit({ type: "done", sessionId: session.id });
+  }
+  return getLatestSession(session);
+}
+
+async function runWorkMain(
+  input: WorkAgentInput,
+  initialSession: WorkSession,
+  ledger: WorkExecutionLedger,
+  memories: Array<{ content: string }>,
+  enabledTools: ToolDefinition[],
+  workHistory: Array<{ role: WorkMessage["role"]; content: string }>,
+  emit: (event: WorkRunEvent) => void,
+): Promise<void> {
+  const adapter = getAdapterForConfig(input.config);
+  let session = initialSession;
+  let route: WorkRouteDecision = { mode: "direct", reason: "router fallback" };
 
   try {
     route = await runWorkStructuredOutput({
@@ -277,6 +347,7 @@ export async function runWorkAgent(input: WorkAgentInput): Promise<WorkSession> 
   emit({ type: "plan", plan });
   const results: ExecutedToolSummary[] = [];
   let shouldRespond = false;
+  let askCount = 0;
 
   for (const step of plan.steps) {
     if (input.signal?.aborted) {
@@ -307,16 +378,67 @@ export async function runWorkAgent(input: WorkAgentInput): Promise<WorkSession> 
       });
 
       if (action.decision === "ask_user") {
-        const content = action.message?.trim() || "继续执行前还需要你补充一些信息。";
-        const message = makeMessage("assistant", content);
+        askCount += 1;
+        const intro = action.message?.trim() || "继续执行前还需要你确认一些信息。";
+        const parsedQuestions = parseWorkAskQuestions(action.questions);
+        const canStructured = askCount <= MAX_ASK_PER_RUN
+          && Boolean(parsedQuestions.questions)
+          && typeof input.requestUserAnswer === "function";
+        if (!parsedQuestions.questions) {
+          // 降级原因落日志：questions 缺失/不合法时用户只能看到纯文本询问，必须可排查
+          console.warn("[WorkAgent] ask_user 降级为文本询问，questions 校验失败:",
+            parsedQuestions.error ?? "questions 字段缺失", "| raw:", JSON.stringify(action.questions).slice(0, 500));
+        }
+        // intro 是否已作为普通消息发过（结构化路径发过则降级时不再重发）
+        let introEmitted = false;
+
+        if (canStructured && parsedQuestions.questions) {
+          // 结构化询问卡片：发布后阻塞等待作答，答案回灌决策上下文，从断点继续执行
+          const publication = publishWorkAskCard(
+            parsedQuestions.questions,
+            { interactionId: newInteractionId(), sessionId: session.id },
+            intro,
+          );
+          // 保底可见性：intro 先发成普通助手消息，即使卡片渲染/事件通道异常，
+          // 用户也能在消息流里看到“我需要你确认”而不是空白（落盘推迟到作答后，避免重复）
+          const introMessage = makeMessage("assistant", intro);
+          emit({ type: "message", message: introMessage });
+          introEmitted = true;
+          emit({ type: "ask_card", payload: publication.payload });
+          try {
+            const submission = await raceWithAbort(
+              input.requestUserAnswer!(publication.payload),
+              input.signal,
+            );
+            const answer = resolveWorkAskSubmission(publication, submission);
+            const answerText = answer.answers
+              .map((item) => `${item.question}：${item.customText ?? (item.selectedValues ?? []).join("、")}`)
+              .join("\n");
+            // 问答落盘（后续轮次可见）+ 同步进本轮决策上下文
+            appendWorkMessage(session.id, makeMessage("assistant", intro));
+            appendWorkMessage(session.id, makeMessage("user", answerText));
+            workHistory.push({ role: "assistant", content: intro });
+            workHistory.push({ role: "user", content: answerText });
+            results.push({ toolId: "ask_user", ok: true, summary: `用户已作答：${outputSummary(answerText)}` });
+            emit({ type: "tool_end", toolId: "ask_user", ok: true, summary: "用户已作答，继续执行" });
+            continue;
+          } catch (error) {
+            if (input.signal?.aborted) throw error;
+            // 作答超时/无效提交：降级为文本暂停询问，用户下条消息仍可补充
+            console.warn("[WorkAgent] ask card round-trip failed, falling back:", error);
+          }
+        }
+
+        // 降级路径：文本暂停询问（老行为，结束本轮等下一条用户消息）
+        const message = makeMessage("assistant", intro);
         appendWorkMessage(session.id, message);
         plan.status = "awaiting_user";
         plan.updatedAt = Date.now();
         updateWorkExecutionState(session.id, { plan, status: "awaiting_user" });
-        emit({ type: "message", message });
+        if (!introEmitted) emit({ type: "message", message });
         emit({ type: "plan", plan });
         emit({ type: "done", sessionId: session.id });
-        return getLatestSession(session);
+        return;
       }
 
       if (action.decision === "respond") {
@@ -419,7 +541,6 @@ export async function runWorkAgent(input: WorkAgentInput): Promise<WorkSession> 
   emit({ type: "message", message });
   emit({ type: "plan", plan });
   emit({ type: "done", sessionId: session.id });
-  return getLatestSession(session);
 }
 
 function getLatestSession(session: WorkSession): WorkSession {

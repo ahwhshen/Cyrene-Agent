@@ -49,6 +49,16 @@ export interface ChatMessage {
     endedAt: number;
     summary: string;
   };
+  /** Minecraft 联机记录标记。存在时渲染为联机气泡（用户侧），content 为空不参与 LLM 上下文。
+   *  sessionId 对应 MinecraftSessionEvent.id，删除消息时联动清理 minecraft-sessions.json。 */
+  minecraftEvent?: {
+    sessionId: string;
+    startedAt: number;
+    endedAt: number;
+    serverLabel: string;
+    players: string[];
+    summary: string;
+  };
   /** 消息来源："local" = 本地创建，"synced" = 从服务器同步（微信等渠道）。 */
   source?: "local" | "synced";
 }
@@ -88,6 +98,39 @@ export interface ChatSession {
   // 用户是否手动改过名；true 时不再根据消息内容自动派生 title。
   // 没有此字段的老数据视为 false（向后兼容）。
   titleIsCustom?: boolean;
+  /** 会话模式（上游 Code 模式增强移植）；老数据无此字段视为普通聊天。 */
+  mode?: ChatSessionMode;
+  /** Code 模式绑定的工作目录（上游 Code 模式增强移植）；Git/LSP 工具据此定位仓库。 */
+  workspaceBinding?: ChatSessionWorkspaceBinding;
+}
+
+/** 会话模式；普通聊天为 chat，其余与 Work 面板视图模式对齐。 */
+export type ChatSessionMode = "chat" | "work" | "code" | "learn";
+
+/** Code 会话的工作目录绑定。 */
+export interface ChatSessionWorkspaceBinding {
+  workspaceRoot: string;
+  displayName?: string;
+  boundAt?: number;
+}
+
+/** Diff Review 单行证据（写文件工具 / git_diff 输出）。 */
+export interface ToolDiffLine {
+  type: "add" | "remove" | "context" | "hunk";
+  text: string;
+}
+
+/** 单文件变更证据（写文件工具 / git_diff 输出），前端 Diff Review 卡片据此渲染。 */
+export interface ToolFileChange {
+  file: string;
+  kind: "added" | "modified" | "deleted" | "renamed";
+  /** renamed 时的原路径。 */
+  fromFile?: string;
+  insertions: number;
+  deletions: number;
+  diff?: ToolDiffLine[];
+  /** diff 行超出预算被截断（统计数字仍完整）。 */
+  truncated?: boolean;
 }
 
 // index.json 里的轻量元数据（列表渲染用）。

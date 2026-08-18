@@ -6,9 +6,10 @@ import { memoryStore } from "../memory/memory-store";
 import type { ToolRiskLevel } from "../permission";
 import type { ToolContext } from "./tool-context";
 
-/** JSON Schema 片段：参数可以是简单类型，也可以是 array/object（含 items/properties）。 */
+/** JSON Schema 片段：参数可以是简单类型，也可以是 array/object（含 items/properties）。
+ *  default 为上游 Code 模式增强移植带入（git 工具声明默认远端等）。 */
 export type JsonSchemaProp =
-  | { type: string; description?: string; enum?: string[] }
+  | { type: string; description?: string; enum?: string[]; default?: unknown }
   | { type: "array"; description?: string; items: JsonSchemaProp }
   | { type: "object"; description?: string; properties: Record<string, JsonSchemaProp>; required?: string[] };
 
@@ -32,6 +33,12 @@ export interface ToolDefinition {
   };
   /** 工具若声明 needsContext，调度层执行时会传入 ToolContext。默认不声明=不传。 */
   needsContext?: boolean;
+  /** 模式限制（上游 Code 模式增强移植）；如 ["code"] 表示仅 Code 模式可用。不填=不限。 */
+  modes?: string[];
+  /** 效果分类：read / mutation / external_side_effect（上游声明字段，本地调度暂不消费）。 */
+  effectKind?: string;
+  /** 验证策略声明（上游声明字段，本地调度暂不消费）。 */
+  verificationPolicy?: string;
   // 执行器：内置工具指向本地函数，外部 MCP 工具指向 transport 调用
   execute: (args: Record<string, unknown>, ctx?: ToolContext) => Promise<string>;
 }

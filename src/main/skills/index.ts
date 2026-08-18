@@ -52,6 +52,23 @@ export function initSkills(): void {
 
   registerSkillTools();
   console.log(LOG_PREFIX, `已加载 ${map.size} 个 skill：`, Array.from(map.keys()).join(", ") || "(无)");
+
+  // 诊断用落盘日志：确认 initSkills 是否执行、扫到了什么（排查"设置页 skill 列表为空"）
+  try {
+    fs.writeFileSync(
+      path.join(app.getPath("userData"), "skills-boot-debug.log"),
+      JSON.stringify({
+        at: new Date().toISOString(),
+        appPath: app.getAppPath(),
+        builtinDir,
+        userDir,
+        builtinCount: builtin.length,
+        userCount: user.length,
+        registered: Array.from(map.keys()),
+      }, null, 2),
+      "utf8",
+    );
+  } catch { /* 诊断日志失败不影响主流程 */ }
 }
 
 /** 持久化某 skill 的 enabled 状态。 */

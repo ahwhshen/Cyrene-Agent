@@ -44,7 +44,7 @@ import { IMAGE_CAPTION_MAX_BYTES, IMAGE_CAPTION_PROMPT, validateCaptionImagePath
 import { decideImageSendStrategy } from "./chat/image-send-strategy";
 import { buildAlwaysOnContext, buildMemoryInjection, runFunctionCallingLoop, scheduleMemoryWrite } from "./orchestrator";
 import { CyreneAgent } from "./orchestrator/cyrene-agent";
-import { indexConversationTurn } from "./orchestrator/history-tools";
+import { indexConversationTurn, runHistoryAutoInjection } from "./orchestrator/history-tools";
 import { buildToneInjection } from "./orchestrator/tone-injector";
 import { getAdapter, buildVendorUrl, getAdapterForConfig, createSseReader } from "./orchestrator/vendors";
 import type { VendorConfig } from "./orchestrator/vendors";
@@ -93,6 +93,17 @@ import type { L0Profile, L1Profile } from "./memory/memory-types";
 import { broadcastChatsChanged, registerChatsIpc } from "./chats/chats-ipc";
 import * as chatsStore from "./chats/chats-store";
 import { recordUsage, getUsage, flush as flushTokenUsage } from "./token-usage-store";
+import {
+  initializeScreenshotService,
+  type ScreenshotService,
+} from "./screenshot/screenshot-lifecycle";
+// Code 模式增强（上游新增功能移植）：LSP 语义查询 + Git 工作台
+import { LspManager } from "./lsp/manager";
+import { createGitService, type GitService } from "./code-git/git-service";
+import { resolveGitExecutable } from "./code-git/git-executable";
+import { registerCodeGitIpc } from "./code-git/code-git-ipc";
+import { registerCodeGitTools } from "./orchestrator/git-tools";
+import { registerLspTool } from "./orchestrator/lsp-tool";
 import { uploadFile as ttsUploadFile, cloneVoice as ttsCloneVoice, synthesize as ttsSynthesize } from "./tts/minimax-engine";
 import { synthesize as gptsovitsSynthesize } from "./tts/gptsovits-engine";
 import { synthesize as customCloudSynthesize } from "./tts/custom-cloud-engine";
@@ -109,6 +120,8 @@ import { setWeatherConfig, setSearchConfig, loadTodos, onTodosChange, setDelegat
 import { registerRecallHistoryTool, backfillChatHistoryFromChatLogs } from "./orchestrator/history-tools";
 import { backfillL2FromChatLogs } from "./memory/memory-backfill";
 import { runReflectionCatchupOnce } from "./memory/memory-compressor";
+import { notifyDreamUserActivity, startDreamScheduler, stopDreamScheduler } from "./memory/memory-dream";
+import { l2DmaeManager } from "./memory/dmae-manager";
 import { registerDocumentTools } from "./orchestrator/document-tools";
 import { registerLifeTools, setTranslateConfig } from "./orchestrator/life-tools";
 import { registerTravelTools, setTravelConfig } from "./orchestrator/travel-tools";
@@ -181,7 +194,7 @@ import type { ProactiveCandidate, ProactiveRuntimeSnapshot } from "./proactive/p
 import { canCommitProactiveMessage } from "./proactive/proactive-policy";
 import type { WorkModelSettings } from "../shared/work-types";
 import type { CallModelSettings } from "../shared/call-types";
-import { initializeWorkStore } from "./work/work-store";
+import { initializeWorkStore, getWorkSession, workSessionMode } from "./work/work-store";
 import { registerWorkIpc } from "./work/work-ipc";
 import { filterWorkTools } from "./work/work-tool-policy";
 import {
@@ -220,10 +233,37 @@ let chatWindow: BrowserWindow | null = null;
 let sidebarWindow: BrowserWindow | null = null;
 let tasksWindow: BrowserWindow | null = null;
 let settingsWindow: BrowserWindow | null = null;
+let pluginPanelWindow: BrowserWindow | null = null;
 let stickerManagerWindow: BrowserWindow | null = null;
 let callWindow: BrowserWindow | null = null;
 let schedulerEngine: SchedulerEngine | null = null;
 let proactiveChatService: ProactiveChatService | null = null;
+let screenshotService: ScreenshotService | null = null;
+let lspManager: LspManager | null = null;
+let codeGitService: GitService | null = null;
+
+/**
+ * Code Git 会话解析适配器（上游 Code 模式增强移植）。
+ * 上游依赖 ChatSession.mode/workspaceBinding；本地无此体系，统一回落到
+ * Work 面板的 code 会话目录绑定（boundDir）合成 ChatSession-like 对象。
+ * 未绑定目录或非 code 会话返回 null，git-service 会给出可读的错误状态。
+ */
+function resolveCodeGitSession(sessionId: string): import("../shared/chat-types").ChatSession | null {
+  const workId = sessionId.startsWith("work:") ? sessionId.slice("work:".length) : sessionId;
+  const workSession = getWorkSession(workId);
+  if (!workSession || workSessionMode(workSession) !== "code" || !workSession.boundDir) return null;
+  return {
+    id: sessionId,
+    title: workSession.title,
+    identityId: null,
+    messages: [],
+    createdAt: workSession.createdAt,
+    updatedAt: workSession.updatedAt,
+    schemaVersion: 1,
+    mode: "code",
+    workspaceBinding: { workspaceRoot: workSession.boundDir },
+  };
+}
 let normalConversationBusyCount = 0;
 let proactiveScreenLocked = false;
 
@@ -707,6 +747,18 @@ interface ModelSettings {
   stickerSimilarityThreshold: number;
   rerankerMode: "light" | "standard" | "none";
   embeddingModel: "minilm" | "bgem3";
+  /** L2 DMAE 工作记忆总开关（默认关 = 纯检索行为，开启后由 DMAE 决定注入取舍）。 */
+  memoryDmaeEnabled: boolean;
+  /** 梦境蒸馏总开关（默认关）。开启后空闲窗口自动做记忆整理。 */
+  memoryDreamEnabled: boolean;
+  /** 做梦专用模型（可选）。四要素齐全才生效，否则跟随主模型。 */
+  dream?: {
+    provider: string;
+    baseUrl: string;
+    model: string;
+    apiKey: string;
+    explicitTransport?: "openai" | "anthropic" | "auto";
+  };
   // 视觉模型配置（可选）。undefined 或未启用 = 不支持看图，read_image 诚实拒绝。
   vision?: VisionModelConfig;
 }
@@ -1003,6 +1055,8 @@ const DEFAULT_MODEL_SETTINGS: ModelSettings = {
   stickerSimilarityThreshold: 0.55,
   rerankerMode: "none",
   embeddingModel: "minilm",
+  memoryDmaeEnabled: false,
+  memoryDreamEnabled: false,
 };
 
 const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
@@ -1330,7 +1384,30 @@ function normalizeModelSettings(input: Partial<ModelSettings> | null | undefined
       : 0.55,
     rerankerMode: input?.rerankerMode === "light" || input?.rerankerMode === "standard" || input?.rerankerMode === "none" ? input.rerankerMode : "none",
     embeddingModel: input?.embeddingModel === "bgem3" ? "bgem3" : "minilm",
+    memoryDmaeEnabled: input?.memoryDmaeEnabled === true,
+    memoryDreamEnabled: input?.memoryDreamEnabled === true,
+    dream: normalizeDreamModelConfig(input?.dream),
     vision: normalizeVisionConfig(input?.vision),
+  };
+}
+
+/** 做梦专用模型归一化：四要素（provider/baseUrl/model/apiKey）齐全才落盘，否则丢弃（跟随主模型）。 */
+function normalizeDreamModelConfig(input: ModelSettings["dream"] | undefined): ModelSettings["dream"] {
+  if (!input || typeof input !== "object") return undefined;
+  const provider = typeof input.provider === "string" ? input.provider.trim() : "";
+  const baseUrl = typeof input.baseUrl === "string" ? input.baseUrl.trim() : "";
+  const model = typeof input.model === "string" ? input.model.trim() : "";
+  const apiKey = typeof input.apiKey === "string" ? input.apiKey.trim() : "";
+  if (!provider || !baseUrl || !model || !apiKey) return undefined;
+  return {
+    provider,
+    baseUrl,
+    model,
+    apiKey,
+    explicitTransport:
+      input.explicitTransport === "openai" || input.explicitTransport === "anthropic" || input.explicitTransport === "auto"
+        ? input.explicitTransport
+        : undefined,
   };
 }
 
@@ -2789,6 +2866,8 @@ async function observeRuntimeState(
 }
 
 async function requestModelReply(inputMessages: unknown, styleFile = "01_default.md"): Promise<ChatReplyPayload> {
+  // 用户消息到达即视为活动：进行中的梦境立即中止，空闲计时归零。
+  notifyDreamUserActivity();
   const settings = loadModelSettings();
   if (!settings.apiKey) {
     throw new Error("还没有填写 API Key，请先在设置里保存 API 配置。");
@@ -3519,6 +3598,60 @@ function createTasksWindow(): void {
   });
 }
 
+// 独立插件面板窗口：主界面/侧栏「插件」按钮的唯一入口（设置页已移除插件选项卡）
+function createPluginPanelWindow(): void {
+  if (pluginPanelWindow && !pluginPanelWindow.isDestroyed()) {
+    pluginPanelWindow.show();
+    pluginPanelWindow.focus();
+    return;
+  }
+
+  const display = screen.getPrimaryDisplay();
+  const { x: dx, y: dy, width: dw, height: dh } = display.workArea;
+  const width = 760;
+  const height = 840;
+  pluginPanelWindow = new BrowserWindow({
+    x: dx + Math.max(0, Math.floor((dw - width) / 2)),
+    y: dy + Math.max(0, Math.floor((dh - height) / 2)),
+    width,
+    height,
+    minWidth: 620,
+    minHeight: 480,
+    title: "昔涟 · 插件",
+    icon: getCurrentAppIconPath(),
+    backgroundColor: "#00000000",
+    autoHideMenuBar: true,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: true,
+    webPreferences: {
+      preload: path.join(__dirname, "..", "..", "preload", "preload", "index.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+
+  attachExternalLinkHandler(pluginPanelWindow);
+
+  if (isDev) {
+    pluginPanelWindow.loadURL("http://localhost:5173/plugins/");
+  } else {
+    pluginPanelWindow.loadFile(
+      path.join(__dirname, "..", "..", "renderer", "plugins", "index.html")
+    );
+  }
+
+  pluginPanelWindow.once("ready-to-show", () => {
+    pluginPanelWindow?.show();
+  });
+
+  pluginPanelWindow.on("closed", () => {
+    pluginPanelWindow = null;
+  });
+}
+
 function createSettingsWindow(section?: string): void {
   if (settingsWindow && !settingsWindow.isDestroyed()) {
     settingsWindow.show();
@@ -4093,6 +4226,17 @@ ipcMain.on(IPC.TASKS_MINIMIZE, () => {
 
 ipcMain.on(IPC.TASKS_CLOSE, () => {
   tasksWindow?.close();
+});
+
+// 独立插件面板窗口：开/最小化/关闭
+ipcMain.on(IPC.PLUGIN_PANEL_OPEN, () => {
+  createPluginPanelWindow();
+});
+ipcMain.on(IPC.PLUGIN_PANEL_MINIMIZE, () => {
+  pluginPanelWindow?.minimize();
+});
+ipcMain.on(IPC.PLUGIN_PANEL_CLOSE, () => {
+  pluginPanelWindow?.close();
 });
 ipcMain.on(IPC.SETTINGS_MINIMIZE, () => {
   settingsWindow?.minimize();
@@ -5414,6 +5558,37 @@ app.whenReady().then(async () => {
     screenMonitorService.start();
   }
 
+  // 截图助手（上游新增）：全局热键 Alt+Shift+S 截图到剪贴板；聊天截图按钮截图后自动插入输入框。
+  // 原生助手缺失或注册异常时优雅降级，不能阻断启动链（后面还有 skills/plugins 初始化）。
+  try {
+    screenshotService = initializeScreenshotService({
+      initialHotkey: "Alt+Shift+S",
+      getReactChatWindow: () => chatWindow,
+      captureMainWindow: async () => {
+        if (!chatWindow || chatWindow.isDestroyed()) return null;
+        return chatWindow.capturePage();
+      },
+    });
+    void screenshotService.prewarm();
+  } catch (err) {
+    console.error("[screenshot] 截图服务初始化失败，已降级跳过：", err);
+  }
+
+  // Code 模式增强（上游新增）：LSP 语义查询工具 + Git 工作台（仅绑定目录的 Work code 会话可用）。
+  // 系统未装 git 时 resolveExecutable 返回 null，git-service 回 git_unavailable 状态，不阻断启动。
+  lspManager = new LspManager({});
+  codeGitService = createGitService({
+    getSession: resolveCodeGitSession,
+    resolveExecutable: () => resolveGitExecutable({
+      systemCommand: "git",
+      // 本地不随包分发 git，bundled 探测失败即回落为"未检测到可用 Git"
+      bundledPath: path.join(process.resourcesPath ?? "", "bin", "git.exe"),
+    }),
+  });
+  registerCodeGitIpc({ service: codeGitService });
+  registerCodeGitTools(codeGitService, toolRegistry);
+  registerLspTool(lspManager, toolRegistry);
+
   // 内置 MCP 自动连接：Playwright (默认关闭,选项控制)
   const initialSettings = loadGeneralSettings();
 
@@ -6036,6 +6211,7 @@ app.whenReady().then(async () => {
     buildAlwaysOnContext: (async (userText, messages) =>
       buildAlwaysOnContext(userText, messages as any)) as BuildOptionsDeps["buildAlwaysOnContext"],
     buildMemoryInjection,
+    buildHistoryAutoInjection: runHistoryAutoInjection,
     buildRelationshipContext,
     buildSystemPrompt,
     buildToolSystemPrompt: (enabledTools) => buildToolSystemPrompt(enabledTools as ToolDefinition[]),
@@ -6184,6 +6360,9 @@ app.whenReady().then(async () => {
       }
     });
 
+    // 梦境蒸馏调度：空闲窗口自动整理记忆（memoryDreamEnabled 默认关，行为零变化）。
+    startDreamScheduler();
+
     console.log("[Reranker] startup preload skipped; reranker initializes when changed in settings.");
   } catch (err) {
     console.error("[Cyrene] RAG init FAILED:", err);
@@ -6200,9 +6379,17 @@ app.on("window-all-closed", () => {});
 app.on("before-quit", () => {
   petWindowMoveController.dispose();
   schedulerEngine?.stop();
+  stopDreamScheduler();
   stopOpener();
   stopAsrTest();
   flushTokenUsage();
+  // 截图助手：注销全局热键 + 关闭原生助手子进程
+  void screenshotService?.shutdown();
+  // Code 模式增强：停掉工作区文件监听 + 关闭全部 LSP 语言服务器子进程
+  void codeGitService?.dispose();
+  void lspManager?.disposeAll();
+  // DMAE 工作记忆状态防抖落盘的最后兜底（5s 防抖窗口内的最后一次变更）
+  void l2DmaeManager.flushNow();
   void shutdownChannels();
   // 关闭消息同步客户端
   stopSyncClient();

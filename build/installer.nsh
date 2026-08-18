@@ -1,7 +1,7 @@
 ; Custom NSIS script for Cyrene Agent installer
 ; Adds a disclaimer page at the beginning of the installation
 ; Author: Playa-0v0
-; Repository: https://github.com/Playa-0v0/Cyrene-Agent/tree/master
+; Repository: https://github.com/ahwhshen/Cyrene-Agent
 
 !include nsDialogs.nsh
 
@@ -85,7 +85,7 @@
     nsDialogs::Create 1018
     Pop $0
 
-    ${NSD_CreateLabel} 10u 10u 280u 100u "本软件「昔涟 / Cyrene Agent」由 Playa-0v0 开发。$\r$\n$\r$\n原始仓库地址：$\r$\nhttps://github.com/Playa-0v0/Cyrene-Agent/tree/master$\r$\n$\r$\n本软件为开源项目，遵循项目许可证使用。$\r$\n$\r$\n点击「下一步 (Next)」继续安装。"
+    ${NSD_CreateLabel} 10u 10u 280u 100u "本软件「昔涟 / Cyrene Agent」安装包由 ahwhshen 打包发布，版权归 ahwhshen 所有。$\r$\n$\r$\n本发行版仓库：$\r$\nhttps://github.com/ahwhshen/Cyrene-Agent$\r$\n$\r$\n本软件基于开源项目 Cyrene-Agent，遵循项目许可证使用；「昔涟」角色知识产权归属米哈游，本项目为个人非商用同人作品。$\r$\n$\r$\n点击「下一步 (Next)」继续安装。"
     Pop $0
 
     nsDialogs::Show

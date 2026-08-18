@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>跃迁记录链接</title>
+<style>
+  /* 插件窗口自带样式：颜色一律走 CSS 变量，随系统深浅色自适应（接口规范 §11）。 */
+  :root {
+    --bg: #f6f2fa;
+    --panel: rgba(255, 255, 255, 0.72);
+    --border: rgba(120, 90, 160, 0.18);
+    --text-strong: #2c2438;
+    --text-default: #4a4158;
+    --text-muted: #837a94;
+    --accent: #a06cd5;
+    --accent-soft: rgba(160, 108, 213, 0.14);
+    --ok: #2e9e6b;
+    --err: #c0504d;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17141d;
+      --panel: rgba(38, 32, 48, 0.72);
+      --border: rgba(255, 255, 255, 0.10);
+      --text-strong: #f1ecf8;
+      --text-default: #d6cfe2;
+      --text-muted: #8f87a0;
+      --accent: #c29ae8;
+      --accent-soft: rgba(194, 154, 232, 0.16);
+      --ok: #58c892;
+      --err: #e08a87;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 18px;
+    font-family: "Microsoft YaHei", system-ui, sans-serif;
+    font-size: 13px;
+    color: var(--text-default);
+    background: var(--bg);
+    display: flex; flex-direction: column; gap: 14px;
+    min-height: 100vh;
+    position: relative;
+  }
+  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .badge {
+    padding: 3px 10px; border-radius: 999px;
+    background: var(--accent-soft); color: var(--accent);
+    border: 1px solid var(--border); font-size: 12px;
+  }
+  .badge.ok { color: var(--ok); }
+  .badge.err { color: var(--err); }
+  button {
+    padding: 7px 18px; border-radius: 10px; cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--panel); color: var(--text-strong);
+    transition: transform .08s ease, background .15s ease;
+  }
+  button:hover:not(:disabled) { background: var(--accent-soft); }
+  button:active:not(:disabled) { transform: scale(.97); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: var(--accent); border-color: transparent; color: #fff; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 14px; padding: 12px 14px;
+  }
+  .panel h3 { margin: 0 0 8px; font-size: 12px; color: var(--text-muted); font-weight: 600; letter-spacing: .04em; }
+  #status-text { font-size: 12px; color: var(--text-muted); line-height: 1.6; white-space: pre-wrap; }
+  #url-box {
+    display: none; margin-top: 10px; padding: 10px;
+    border-radius: 10px; border: 1px solid var(--border);
+    background: var(--accent-soft);
+    font-family: Consolas, monospace; font-size: 12px;
+    word-break: break-all; line-height: 1.6; color: var(--text-strong);
+  }
+  input[type="text"] {
+    flex: 1; min-width: 220px;
+    padding: 7px 10px; border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg); color: var(--text-default);
+    font-size: 12px; outline: none;
+  }
+  input[type="text"]:focus { border-color: var(--accent); }
+  .hint { color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+
+  /* ── 首次启动说明页（遮罩层）：仅第一次打开窗口自动弹出，之后只能点「说明」查看 ── */
+  #guide-overlay {
+    display: none;
+    position: fixed; inset: 0; z-index: 50;
+    background: rgba(20, 16, 28, 0.55);
+    align-items: center; justify-content: center; padding: 24px;
+  }
+  #guide-overlay.show { display: flex; }
+  #guide-card {
+    max-width: 460px; width: 100%;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 18px; padding: 22px 24px;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, .25);
+  }
+  #guide-card h2 { margin: 0 0 4px; font-size: 16px; color: var(--text-strong); }
+  #guide-card .sub { font-size: 12px; color: var(--text-muted); margin-bottom: 14px; }
+  #guide-card ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; }
+  #guide-card li { line-height: 1.7; color: var(--text-default); }
+  #guide-card li strong { color: var(--text-strong); }
+  .guide-note {
+    margin-top: 14px; padding: 8px 12px; border-radius: 10px;
+    background: var(--accent-soft); color: var(--text-muted);
+    font-size: 12px; line-height: 1.6;
+  }
+  #guide-card .actions { margin-top: 18px; display: flex; justify-content: flex-end; gap: 10px; }
+</style>
+</head>
+<body>
+  <div class="row">
+    <strong style="color: var(--text-strong); font-size: 15px;">跃迁记录链接</strong>
+    <span id="status-badge" class="badge">待提取</span>
+    <span style="flex: 1;"></span>
+    <button id="guide-btn">📖 说明</button>
+    <button id="extract-btn" class="primary">🔗 提取链接</button>
+  </div>
+
+  <div class="panel">
+    <h3>结果</h3>
+    <div id="status-text">先在《崩坏：星穹铁道》里打开一次「跃迁 → 历史记录」，再点右上角「提取链接」。</div>
+    <div id="url-box"></div>
+    <div class="row" id="url-actions" style="display: none; margin-top: 10px;">
+      <button id="copy-btn">📋 复制链接</button>
+      <span class="hint" id="cache-info"></span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>自动检测失败时 · 手动兜底</h3>
+    <div class="row" style="margin-bottom: 8px;">
+      <input id="game-dir-input" type="text" placeholder="游戏安装目录（或 StarRail.exe 完整路径）" />
+      <button id="save-dir-btn">保存目录</button>
+      <button id="extract-manual-btn">用此目录提取</button>
+    </div>
+    <div class="hint">云游戏 / 自定义安装位置可能无法自动定位，手动填一次即可记住。也可以直接把别处拿到的链接粘贴给 AI 使用。</div>
+  </div>
+
+  <div class="hint">⚠️ 链接里的 authkey 是账号临时凭证，请勿分享到公开场合；本插件全程本地读取，不上传任何数据。</div>
+
+  <!-- 首次启动说明页 -->
+  <div id="guide-overlay">
+    <div id="guide-card">
+      <h2>📖 首次使用 · 操作说明</h2>
+      <div class="sub">跃迁记录链接需要游戏自己"写"进本地缓存，所以第一次用请按下面三步走：</div>
+      <ol>
+        <li><strong>打开游戏</strong>，进入「跃迁」界面；</li>
+        <li>点「<strong>历史记录</strong>」，<strong>翻几页记录</strong>再返回（确保缓存写入完整）；</li>
+        <li>回到本窗口，点右上角「<strong>提取链接</strong>」查看结果。</li>
+      </ol>
+      <div class="guide-note">
+        提示：链接含临时 authkey，过期后重复第 2、3 步即可刷新；云游戏没有本地缓存，请用手动粘贴方式。
+        本说明仅首次启动自动弹出，之后可点左上角「📖 说明」再次查看。
+      </div>
+      <div class="actions">
+        <button id="guide-ok-btn" class="primary">我知道了</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const bridge = window.cyrenePlugin;
+  const badge = document.getElementById("status-badge");
+  const statusText = document.getElementById("status-text");
+  const urlBox = document.getElementById("url-box");
+  const urlActions = document.getElementById("url-actions");
+  const copyBtn = document.getElementById("copy-btn");
+  const cacheInfo = document.getElementById("cache-info");
+  const extractBtn = document.getElementById("extract-btn");
+  const extractManualBtn = document.getElementById("extract-manual-btn");
+  const saveDirBtn = document.getElementById("save-dir-btn");
+  const dirInput = document.getElementById("game-dir-input");
+  const guideOverlay = document.getElementById("guide-overlay");
+  const guideBtn = document.getElementById("guide-btn");
+  const guideOkBtn = document.getElementById("guide-ok-btn");
+  let currentUrl = "";
+
+  function setBusy(busy) {
+    extractBtn.disabled = busy;
+    extractManualBtn.disabled = busy;
+    if (busy) {
+      badge.textContent = "提取中…";
+      badge.className = "badge";
+    }
+  }
+
+  function showResult(raw) {
+    let data;
+    try { data = JSON.parse(raw); } catch { statusText.textContent = raw; return; }
+    if (!data.ok) {
+      badge.textContent = "失败";
+      badge.className = "badge err";
+      statusText.textContent = data.error || "提取失败";
+      urlBox.style.display = "none";
+      urlActions.style.display = "none";
+      return;
+    }
+    currentUrl = data.url;
+    badge.textContent = "已提取";
+    badge.className = "badge ok";
+    statusText.textContent = "提取成功，链接如下（authkey 有时效，过期请重新在游戏里打开一次历史记录再提取）：";
+    urlBox.textContent = data.url;
+    urlBox.style.display = "block";
+    urlActions.style.display = "flex";
+    cacheInfo.textContent = data.cacheMtime ? `缓存写入时间：${data.cacheMtime}` : "";
+  }
+
+  // ── 说明页：仅首次自动弹出；之后只能点「说明」按钮 ──
+  async function initGuide() {
+    try {
+      const raw = await bridge.callTool("warp_record_url_guide_state", { action: "get" });
+      const { guideSeen } = JSON.parse(raw);
+      if (!guideSeen) guideOverlay.classList.add("show");
+    } catch { /* 桥不可用时不弹说明，不阻塞主功能 */ }
+  }
+  guideBtn.addEventListener("click", () => guideOverlay.classList.add("show"));
+  guideOkBtn.addEventListener("click", async () => {
+    guideOverlay.classList.remove("show");
+    try { await bridge.callTool("warp_record_url_guide_state", { action: "seen" }); } catch {}
+  });
+
+  // ── 提取 ──
+  extractBtn.addEventListener("click", async () => {
+    setBusy(true);
+    statusText.textContent = "正在查找游戏目录并读取缓存…";
+    try {
+      showResult(await bridge.callTool("warp_record_url_extract", { mode: "auto" }));
+    } catch (e) { statusText.textContent = "调用失败：" + e.message; }
+    setBusy(false);
+  });
+  extractManualBtn.addEventListener("click", async () => {
+    const dir = dirInput.value.trim();
+    if (!dir) { statusText.textContent = "请先在输入框里填写游戏目录"; return; }
+    setBusy(true);
+    try {
+      const saved = await bridge.callTool("warp_record_url_set_dir", { dir });
+      if (saved.indexOf("已保存") !== 0) { statusText.textContent = saved; setBusy(false); return; }
+      showResult(await bridge.callTool("warp_record_url_extract", { mode: "manual" }));
+    } catch (e) { statusText.textContent = "调用失败：" + e.message; }
+    setBusy(false);
+  });
+  saveDirBtn.addEventListener("click", async () => {
+    const dir = dirInput.value.trim();
+    if (!dir) { statusText.textContent = "请先在输入框里填写游戏目录"; return; }
+    statusText.textContent = await bridge.callTool("warp_record_url_set_dir", { dir });
+  });
+
+  // ── 复制 ──
+  copyBtn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(currentUrl);
+      copyBtn.textContent = "✅ 已复制";
+    } catch {
+      // 剪贴板权限失败时退化为选中文本
+      const range = document.createRange();
+      range.selectNodeContents(urlBox);
+      const sel = window.getSelection();
+      sel.removeAllRanges(); sel.addRange(range);
+      copyBtn.textContent = "请手动 Ctrl+C";
+    }
+    setTimeout(() => (copyBtn.textContent = "📋 复制链接"), 1500);
+  });
+
+  initGuide();
+</script>
+</body>
+</html>

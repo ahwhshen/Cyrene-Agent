@@ -94,39 +94,41 @@ body {
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   width: 100%;
   padding: 8px 10px;
-  border-radius: 12px;
-  color: rgba(235, 229, 245, 0.70);
+  border-radius: 10px;
+  color: var(--rb-text-default);
   font: var(--rb-text-small-em);
   text-align: left;
+  /* 无框纯文字：与侧栏背景融为一体，仅 hover/选中时才出现底色 */
   background: transparent;
-  border: 1px solid transparent;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 120ms ease;
+  border: none;
+  transition: background 120ms ease, color 120ms ease;
 }
 
-.nav-item span {
-  width: 18px;
-  text-align: center;
-  filter: drop-shadow(0 0 5px rgba(236, 72, 153, 0.35));
-}
-
-.nav-item:hover,
-.nav-item.is-active {
-  color: var(--rb-text-strong);
-  background: rgba(236, 72, 153, 0.16);
-  border-color: rgba(255, 182, 220, 0.24);
+/* 导航图标：单色 SVG（stroke=currentColor），颜色跟随文字自动适配主题切换 */
+.nav-item .nav-icon {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  color: inherit;
 }
 
 .nav-item:hover {
-  transform: translateY(-1px);
+  color: var(--rb-text-strong);
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.nav-item.is-active {
+  color: var(--rb-text-strong);
+  background: rgba(255, 255, 255, 0.13);
 }
 
 .nav-divider {
   width: 100%;
   border: none;
-  border-top: 1px solid rgba(255, 182, 220, 0.14);
+  border-top: 1px solid rgba(255, 255, 255, 0.10);
   margin: 7px 0;
 }
 
@@ -1154,6 +1156,11 @@ body {
   margin-top: 12px;
 }
 
+/* 开关行内的说明文字贴着标题，不用卡片级的大间距 */
+#cyrene-panel .agent-status-row--switch .field-note {
+  margin-top: 2px;
+}
+
 #cyrene-panel .field-note.is-hidden {
   display: none;
 }
@@ -1739,141 +1746,7 @@ body {
   background: rgba(255, 255, 255, 0.08);
 }
 
-/* 插件栏（pluginpacks）——外部扩展插件包卡片 */
-.pluginpack-card {
-  padding: 14px 16px;
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  background: rgba(255, 255, 255, 0.045);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-}
-.pluginpack-card__head {
-  display: grid;
-  grid-template-columns: 42px 1fr auto;
-  align-items: center;
-  gap: 14px;
-}
-.pluginpack-card__icon {
-  width: 42px;
-  height: 42px;
-  border-radius: 14px;
-  display: grid;
-  place-items: center;
-  background: rgba(139, 92, 246, 0.14);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 22px;
-  overflow: hidden;
-}
-/* 插件自带图标：填满图标槽，圆角与槽一致 */
-.pluginpack-card__icon-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  border-radius: inherit;
-  display: block;
-}
-.pluginpack-card__title {
-  margin: 0;
-  color: var(--rb-text-strong);
-  font: var(--rb-text-base);
-  font-weight: 600;
-}
-.pluginpack-card__meta {
-  margin-top: 3px;
-  color: rgba(255, 182, 220, 0.72);
-  font-size: 11px;
-  letter-spacing: 0.02em;
-}
-.pluginpack-card__desc {
-  margin: 4px 0 0;
-  color: rgba(235, 229, 245, 0.52);
-  font: var(--rb-text-small);
-}
-.pluginpack-card__actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.pluginpack-open-btn {
-  padding: 7px 14px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 182, 220, 0.28);
-  background: linear-gradient(135deg, rgba(255, 110, 199, 0.22), rgba(139, 92, 246, 0.18));
-  color: rgba(255, 238, 248, 0.95);
-  font-size: 12px;
-  cursor: pointer;
-  transition: transform 0.16s ease, border-color 0.16s ease;
-}
-.pluginpack-open-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  border-color: rgba(255, 182, 220, 0.5);
-}
-.pluginpack-open-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.pluginpack-card__error {
-  margin-top: 10px;
-  padding: 8px 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(248, 113, 113, 0.3);
-  background: rgba(248, 113, 113, 0.08);
-  color: rgba(254, 202, 202, 0.92);
-  font-size: 12px;
-}
-.pluginpack-card__warn {
-  margin-top: 10px;
-  padding: 8px 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(250, 204, 21, 0.3);
-  background: rgba(250, 204, 21, 0.07);
-  color: rgba(254, 240, 138, 0.92);
-  font-size: 12px;
-}
-.pluginpack-form {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px dashed rgba(255, 182, 220, 0.15);
-  display: grid;
-  gap: 10px;
-}
-.pluginpack-form__section {
-  color: rgba(255, 182, 220, 0.8);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  margin-top: 2px;
-}
-.pluginpack-field {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.pluginpack-field.is-hidden {
-  display: none;
-}
-.pluginpack-field__label {
-  min-width: 96px;
-  font-size: 12px;
-  color: var(--rb-text-muted);
-}
-.pluginpack-field__input {
-  flex: 1;
-  padding: 8px 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 182, 220, 0.18);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(254, 247, 255, 0.9);
-  font-size: 13px;
-}
-.pluginpack-field__input:focus {
-  outline: none;
-  border-color: rgba(255, 182, 220, 0.5);
-  background: rgba(255, 255, 255, 0.08);
-}
-select.pluginpack-field__input {
-  appearance: auto;
-}
+/* 插件栏 pluginpacks 卡片样式已移至独立插件面板窗口（renderer/plugins/plugins.css） */
 .plugin-switch {
   position: relative;
   width: 46px;
@@ -1918,16 +1791,8 @@ select.pluginpack-field__input {
   background: var(--rb-text-on-pink);
 }
 
-/* 插件栏空状态提示：面板最底部一行的浅色说明文字 */
-/* :not(.is-hidden) 保证隐藏时不会用 ID 特异性压过 .is-hidden 的 display:none（否则会在每个栏串显） */
-#pluginpacks-panel:not(.is-hidden) {
-  display: flex;
-  flex-direction: column;
-  min-height: 100%;
-}
-
-/* 空态块（skills-empty / pluginpacks-empty 复用）：JS 通过切换 is-hidden 控制显隐，
-   必须有对应 display:none 规则，否则“未扫描到插件包”等文案会无视隐藏类一直显示 */
+/* 空态块（skills 栏用）：JS 通过切换 is-hidden 控制显隐，
+   必须有对应 display:none 规则，否则文案会无视隐藏类一直显示 */
 .skills-empty {
   padding: 24px 8px;
   text-align: center;
@@ -1937,17 +1802,6 @@ select.pluginpack-field__input {
 }
 .skills-empty.is-hidden {
   display: none;
-}
-#pluginpacks-empty {
-  margin-top: auto;
-  padding-top: 18px;
-  text-align: center;
-  color: var(--rb-text-faint);
-  font: var(--rb-text-micro);
-  letter-spacing: 0.02em;
-}
-#pluginpacks-empty p {
-  margin: 2px 0;
 }
 
 /* 本地文件权限胶囊（分段选择器） */
@@ -2769,6 +2623,14 @@ select.pluginpack-field__input {
   position: relative;
 }
 
+/* 点击卡片后焦点残留，浏览器会在边框外再画一圈浅色焦点轮廓（"短线框"），去掉 */
+.tts-engine:focus,
+.tts-engine:focus-visible,
+.asr-profile-card:focus,
+.asr-profile-card:focus-visible {
+  outline: none;
+}
+
 .tts-engine:hover {
   background: rgba(255, 192, 230, 0.1);
   border-color: rgba(255, 182, 220, 0.36);
@@ -3078,6 +2940,51 @@ select.pluginpack-field__input {
   font-size: 12px;
   color: rgba(235, 229, 245, 0.5);
   line-height: 1.6;
+}
+
+/* TTS / ASR 面板：去掉设置行与提示文字的"外围文本框"，与面板背景融为一体，
+   仅保留文字与控件本身；输入框/引擎卡片的框是功能边界，保留不动 */
+#tts-panel .setting-row,
+#asr-panel .setting-row {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+#tts-panel .tts-hint,
+#asr-panel .tts-hint {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+/* 嵌套在设置行内的提示文字：去掉多余上边距，与标题贴近 */
+.setting-row .tts-hint {
+  margin-top: 4px;
+}
+
+/* 面板内的范围滑块与全局滑块样式统一（否则显示原生滑轨外框） */
+#tts-panel input[type="range"],
+#asr-panel input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  outline: none;
+}
+
+#tts-panel input[type="range"]::-webkit-slider-thumb,
+#asr-panel input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(255, 110, 199, 0.9), rgba(168, 85, 247, 0.85));
+  cursor: pointer;
+  box-shadow: 0 0 10px rgba(236, 72, 153, 0.3);
 }
 
 .opener-pack-warning {

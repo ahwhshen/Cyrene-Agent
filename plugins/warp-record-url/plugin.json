@@ -1,0 +1,24 @@
+{
+  "id": "warp-record-url",
+  "name": "星穹铁道·跃迁记录链接",
+  "description": "提取《崩坏：星穹铁道》跃迁记录页面链接（含临时 authkey）：读取游戏本地 WebCache，支持手动粘贴兜底；首次启动自带操作说明。",
+  "version": "1.0.0",
+  "entry": "lib/index.js",
+  "icon": "icon.png",
+  "defaultEnabled": false,
+  "risk": ["shell", "fs-read"],
+  "settingsSchema": [
+    { "key": "gameDir", "type": "text", "label": "游戏安装目录", "section": "基础", "default": "", "placeholder": "留空自动检测（注册表 + 常见路径）；也可填 StarRail.exe 完整路径" }
+  ],
+  "ui": {
+    "mode": "window",
+    "entry": "window/index.html",
+    "window": {
+      "width": 680,
+      "height": 600,
+      "title": "跃迁记录链接",
+      "resizable": true,
+      "policy": "reuse"
+    }
+  }
+}

@@ -3,7 +3,7 @@
 
 appId: com.cyrene.live2d
 productName: "Cyrene"
-copyright: "Copyright © 2024 Cyrene"
+copyright: "Copyright © 2026 ahwhshen. All rights reserved."
 
 directories:
   output: release
@@ -20,8 +20,9 @@ files:
   - prompts/**/*
   # Include skills
   - skills/**/*
-  # Include 内置插件包（货币战争、demo-window、hello-settings 等，运行时扫描 appPath/plugins）
-  - plugins/**/*
+  # Include 内置插件包：发行版只带货币战争插件（运行时扫描 appPath/plugins）
+  - plugins/currency-wars/**/*
+  - plugins/README.md
   # Include game recipes
   - game-recipes/**/*
   # Include models (reranker/embedding 配置 + tokenizer + onnx 权重，全部随包分发)
@@ -39,6 +40,8 @@ files:
   - "!**/node_modules/playwright"
   - "!**/node_modules/playwright-core"
   - "!**/node_modules/@playwright"
+  # 版权音频一律不进包（背景音乐用仓库内置 bgm.mp3）
+  - "!**/*.flac"
 
 # Extra resources that need to be bundled
 # 注：Live2D Cubism Core 已由 renderer/public/live2dcubismcore.min.js 随前端打包，无需额外资源
@@ -47,6 +50,11 @@ extraFiles:
   # 注意必须用 extraFiles（安装根目录），extraResources 会放进 resources\ 子目录
   - from: build/CyreneLauncher.vbs
     to: CyreneLauncher.vbs
+
+# 截图助手原生可执行文件（需先 npm run build:screenshot-helper，依赖 Rust 工具链）
+extraResources:
+  - from: resources/bin/cyrene-screenshot.exe
+    to: bin/cyrene-screenshot.exe
 
 win:
   target:

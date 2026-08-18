@@ -850,17 +850,18 @@ html[data-ui-theme="pearl-white"] .chat .chat__winbtn--close:hover {
   flex: 0 0 auto;
   padding: 10px 12px;
   border-radius: 12px;
-  border: 1.5px dashed var(--rb-border-strong);
-  background: var(--rb-border-faint);
-  color: var(--rb-text-default);
+  border: 1px solid transparent;
+  /* 与工作侧“新建会话”按钮一致的粉紫渐变 */
+  background: var(--rb-grad-pink);
+  color: var(--rb-text-on-pink);
   font-size: 13px;
   cursor: pointer;
-  transition: background 0.2s, border-color 0.2s, transform 0.12s;
+  box-shadow: var(--rb-glow-soft);
+  transition: filter 0.2s, transform 0.12s;
 }
 
 .chat__rail-new:hover {
-  background: var(--rb-border-soft);
-  border-color: var(--rb-pink-glow);
+  filter: brightness(1.06);
 }
 
 .chat__rail-new:active {

@@ -112,7 +112,8 @@
 [data-ui-theme="pearl-white"] .chat,
 [data-ui-theme="pearl-white"] .settings-shell,
 [data-ui-theme="pearl-white"] .sidebar,
-[data-ui-theme="pearl-white"] .tasks {
+[data-ui-theme="pearl-white"] .tasks,
+[data-ui-theme="pearl-white"] .plugin-shell {
   /* 统一底色：纯色 #fdf9fb（用户取截图色，实测 rgb(253,249,251)）；
      前版 color-mix 98%+2% 淡粉白已弃用（chat.css 对 .chat 另有同值覆写） */
   background: #fdf9fb;
@@ -126,7 +127,8 @@
 [data-ui-theme="pearl-white"] .chat::before,
 [data-ui-theme="pearl-white"] .settings-shell::before,
 [data-ui-theme="pearl-white"] .sidebar::before,
-[data-ui-theme="pearl-white"] .tasks::before {
+[data-ui-theme="pearl-white"] .tasks::before,
+[data-ui-theme="pearl-white"] .plugin-shell::before {
   opacity: 0;
 }
 
@@ -138,6 +140,7 @@
 [data-ui-theme="pearl-white"] .settings-titlebar,
 [data-ui-theme="pearl-white"] .sidebar__titlebar,
 [data-ui-theme="pearl-white"] .tasks__titlebar,
+[data-ui-theme="pearl-white"] .plugin-shell__titlebar,
 [data-ui-theme="pearl-white"] .sticker-titlebar {
   /* 标题栏放行透明，让统一淡粉白底色贯通整窗（chat 风格） */
   background: transparent;
@@ -154,6 +157,8 @@
 [data-ui-theme="pearl-white"] .chat__hint,
 [data-ui-theme="pearl-white"] .sidebar__hint,
 [data-ui-theme="pearl-white"] .tasks__hint,
+[data-ui-theme="pearl-white"] .plugin-shell__hint,
+[data-ui-theme="pearl-white"] .plugin-shell__desc,
 [data-ui-theme="pearl-white"] .chat__rail-meta,
 [data-ui-theme="pearl-white"] .chat__rail-time,
 [data-ui-theme="pearl-white"] .chat__rail-identity,
@@ -272,13 +277,41 @@
   opacity: 0.72;
 }
 
-[data-ui-theme="pearl-white"] .nav-item span {
-  filter: none;
+/* 左侧导航选项卡：默认无框纯文字，仅 hover/选中时浅灰底，文字/图标走语义变量自动适配 */
+[data-ui-theme="pearl-white"] .nav-item:hover {
+  color: var(--rb-text-strong);
+  background: rgba(38, 28, 46, 0.08);
+}
+
+[data-ui-theme="pearl-white"] .nav-item.is-active {
+  color: var(--rb-text-strong);
+  background: rgba(38, 28, 46, 0.10);
 }
 
 [data-ui-theme="pearl-white"] .nav-divider {
   border-top-color: var(--rb-border-strong);
   margin: 9px 2px;
+}
+
+/* TTS / ASR 面板：设置行与提示文字无框化（覆盖上方卡片底色组），与面板背景融为一体 */
+[data-ui-theme="pearl-white"] #tts-panel .setting-row,
+[data-ui-theme="pearl-white"] #asr-panel .setting-row {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+[data-ui-theme="pearl-white"] #tts-panel .tts-hint,
+[data-ui-theme="pearl-white"] #asr-panel .tts-hint {
+  background: transparent;
+  border: none;
+}
+
+/* 子分区卡片化在同色底上只剩阴影边缘（隐约细线框），改成透明无阴影 */
+[data-ui-theme="pearl-white"] #tts-panel .tts-section,
+[data-ui-theme="pearl-white"] #asr-panel .tts-section {
+  background: transparent;
+  box-shadow: none;
 }
 
 [data-ui-theme="pearl-white"] .switch__track,
@@ -386,8 +419,6 @@
   color: var(--rb-pink-600);
 }
 
-[data-ui-theme="pearl-white"] .nav-item:hover,
-[data-ui-theme="pearl-white"] .nav-item.is-active,
 [data-ui-theme="pearl-white"] .chat__rail-item:hover,
 [data-ui-theme="pearl-white"] .chat__rail-item.is-active,
 [data-ui-theme="pearl-white"] .sidebar__icon-btn.is-active {
@@ -466,6 +497,7 @@
 [data-ui-theme="pearl-white"] .sidebar__icon-btn,
 [data-ui-theme="pearl-white"] .sidebar__winbtn,
 [data-ui-theme="pearl-white"] .tasks__winbtn,
+[data-ui-theme="pearl-white"] .plugin-shell__winbtn,
 [data-ui-theme="pearl-white"] .chat__icon-btn,
 [data-ui-theme="pearl-white"] .chat__winbtn,
 [data-ui-theme="pearl-white"] .chat__attach,
@@ -511,6 +543,7 @@
 [data-ui-theme="pearl-white"] .sidebar__icon-btn:hover,
 [data-ui-theme="pearl-white"] .sidebar__winbtn:hover,
 [data-ui-theme="pearl-white"] .tasks__winbtn:hover,
+[data-ui-theme="pearl-white"] .plugin-shell__winbtn:hover,
 [data-ui-theme="pearl-white"] .chat__icon-btn:hover,
 [data-ui-theme="pearl-white"] .chat__winbtn:hover,
 [data-ui-theme="pearl-white"] .accordion-toggle:hover,

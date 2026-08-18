@@ -13,6 +13,7 @@ export default defineConfig({
         chat: resolve(__dirname, "src/renderer/chat/index.html"),
         sidebar: resolve(__dirname, "src/renderer/sidebar/index.html"),
         tasks: resolve(__dirname, "src/renderer/tasks/index.html"),
+        plugins: resolve(__dirname, "src/renderer/plugins/index.html"),
         settings: resolve(__dirname, "src/renderer/settings/index.html"),
         stickers: resolve(__dirname, "src/renderer/sticker-manager/index.html"),
         call: resolve(__dirname, "src/renderer/call/index.html"),

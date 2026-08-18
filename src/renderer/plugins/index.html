@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>昔涟 · 插件</title>
+  <link rel="stylesheet" href="../ui/tokens.css" />
+  <link rel="stylesheet" href="../ui/fonts.css" />
+  <link rel="stylesheet" href="../ui/base.css" />
+  <link rel="stylesheet" href="./plugins.css" />
+</head>
+<body>
+  <div class="plugin-shell">
+    <header class="plugin-shell__titlebar">
+      <div class="plugin-shell__title">
+        <span class="plugin-shell__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 2v5M15 2v5M6 7h12v4a6 6 0 0 1-4 5.65V22h-4v-5.35A6 6 0 0 1 6 11z" /></svg></span>
+        <span class="plugin-shell__name">插件</span>
+        <span class="plugin-shell__hint">扩展插件包 · 启动时自动扫描</span>
+      </div>
+      <div class="plugin-shell__titlebar-actions">
+        <button type="button" class="plugin-shell__winbtn" id="min-btn" aria-label="最小化" title="最小化">
+          <svg width="9" height="2" viewBox="0 0 9 2" aria-hidden="true"><rect width="9" height="2" rx="1" fill="currentColor"/></svg>
+        </button>
+        <button type="button" class="plugin-shell__winbtn plugin-shell__winbtn--close" id="close-btn" aria-label="关闭" title="关闭">
+          <svg width="9" height="9" viewBox="0 0 9 9" aria-hidden="true">
+            <line x1="2" y1="2" x2="7" y2="7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            <line x1="7" y1="2" x2="2" y2="7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <main class="plugin-shell__body">
+      <p class="plugin-shell__desc">支持独立界面与声明式配置；把插件目录（含 plugin.json）放进应用目录 plugins/ 或用户数据目录 plugins/，重启后自动识别。核心功能不在此列。</p>
+
+      <div class="pluginpack-list" id="pluginpack-list"></div>
+
+      <div class="pluginpack-empty is-hidden" id="pluginpack-empty">
+        <p>还没有扫描到插件包。</p>
+        <p>把插件目录（含 plugin.json）放进应用目录 plugins/ 或用户数据目录 plugins/，重启后自动识别。</p>
+      </div>
+    </main>
+
+    <div class="cy-modal-overlay is-hidden" id="plugin-admin-overlay">
+      <div class="cy-modal">
+        <div class="cy-modal__head">
+          <span class="cy-modal__icon">🛡️</span>
+          <h3 class="cy-modal__title">权限警告</h3>
+        </div>
+        <hr class="cy-modal__divider" />
+        <p class="cy-modal__body" id="plugin-admin-body" style="white-space:pre-wrap"></p>
+        <div class="cy-modal__actions">
+          <button type="button" class="btn-secondary" id="plugin-admin-cancel">暂不启用</button>
+          <button type="button" class="btn-primary" id="plugin-admin-confirm">以管理员身份重启</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="./plugins.ts"></script>
+</body>
+</html>

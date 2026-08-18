@@ -24,6 +24,7 @@ import type {
   WorkSessionMeta,
   WorkRunAttachment,
 } from "../../shared/work-types";
+import type { WorkAskAnswerSubmission, WorkAskCardPayload } from "../../shared/work-ask-types";
 import {
   attachmentKindLabel,
   emptyStateCopyFor,
@@ -43,6 +44,8 @@ export interface WorkApi {
   createSession(options?: string | { title?: string; mode?: "work" | "code" | "learn"; boundDir?: string }): Promise<WorkSession>;
   renameSession(id: string, title: string): Promise<WorkSession | null>;
   deleteSession(id: string): Promise<boolean>;
+  pinSession(id: string, pinned: boolean): Promise<boolean>;
+  reorderSessions(orderedIds: string[]): Promise<boolean>;
   openFolder(): Promise<void>;
   selectDir(): Promise<string | null>;
   bindDir(id: string, boundDir?: string): Promise<WorkSession | null>;
@@ -61,6 +64,8 @@ export interface WorkApi {
   captionImage(filePath: string): Promise<{ ok: boolean; caption?: string; error?: string }>;
   run(sessionId: string, text: string, attachments?: WorkRunAttachment[]): Promise<{ ok: boolean; error?: string }>;
   cancel(sessionId: string): Promise<boolean>;
+  /** 结构化询问卡片作答回传。 */
+  answerAsk(submission: { interactionId: string; answers: WorkAskAnswerSubmission[] }): Promise<{ ok: boolean; error?: string }>;
   onEvent(callback: (event: WorkRunEvent) => void): () => void;
 }
 
@@ -95,6 +100,7 @@ export interface WorkPanelHandle {
 export function mountWorkPanel(root: HTMLElement): WorkPanelHandle {
   const api = window.work;
   if (!api) throw new Error("Work API unavailable");
+  const workApi = api;
 
   const byId = <T extends HTMLElement>(id: string): T => root.querySelector(`#${id}`) as T;
   const maybeById = <T extends HTMLElement>(id: string): T | null => root.querySelector(`#${id}`);
@@ -159,17 +165,103 @@ export function mountWorkPanel(root: HTMLElement): WorkPanelHandle {
       }
       const meta = document.createElement("span");
       meta.textContent = `${session.status} · ${formatTime(session.updatedAt)}`;
+      if (session.pinned) {
+        button.classList.add("is-pinned");
+        title.prepend("📌 ");
+      }
       button.append(title, meta);
       button.addEventListener("click", () => void openSession(session.id));
-      button.addEventListener("contextmenu", async (event) => {
+      button.addEventListener("contextmenu", (event) => {
         event.preventDefault();
-        if (!confirm(`删除 Work 会话“${session.title}”？`)) return;
-        await api.deleteSession(session.id);
-        if (activeSession?.id === session.id) activeSession = null;
-        await refreshSessions();
+        // 必须阻断冒泡：否则 document 级“点击外部关菜单”监听器会立即把刚弹出的菜单藏掉
+        event.stopPropagation();
+        showSessionMenu(event.clientX, event.clientY, session);
       });
       sessionList.appendChild(button);
     }
+  }
+
+  // —— 会话栏右键菜单（与聊天会话栏一致：置顶/上下移动/删除，删除不再弹 confirm）——
+  let sessionMenu: HTMLElement | null = document.querySelector(".wp-session-menu");
+  if (!sessionMenu) {
+    sessionMenu = document.createElement("div");
+    sessionMenu.className = "rail-context-menu wp-session-menu is-hidden";
+    const makeItem = (cls: string, label: string): HTMLButtonElement => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = `rcm-item ${cls}`;
+      item.textContent = label;
+      sessionMenu!.appendChild(item);
+      return item;
+    };
+    const pinBtn = makeItem("wsm-pin", "置顶");
+    const upBtn = makeItem("wsm-up", "上移");
+    const downBtn = makeItem("wsm-down", "下移");
+    const deleteBtn = makeItem("rcm-delete wsm-delete", "删除");
+    pinBtn.addEventListener("click", () => { void applySessionPin(); });
+    upBtn.addEventListener("click", () => { void applySessionMove(-1); });
+    downBtn.addEventListener("click", () => { void applySessionMove(1); });
+    deleteBtn.addEventListener("click", () => { void applySessionDelete(); });
+    document.body.appendChild(sessionMenu);
+    document.addEventListener("click", () => hideSessionMenu());
+    document.addEventListener("contextmenu", (event) => {
+      if (sessionMenu && !sessionMenu.contains(event.target as Node)) hideSessionMenu();
+    });
+  }
+  let menuTargetId = "";
+
+  function hideSessionMenu(): void {
+    sessionMenu?.classList.add("is-hidden");
+    menuTargetId = "";
+  }
+
+  function showSessionMenu(x: number, y: number, session: WorkSessionMeta): void {
+    if (!sessionMenu) return;
+    menuTargetId = session.id;
+    const pinBtn = sessionMenu.querySelector(".wsm-pin");
+    if (pinBtn) pinBtn.textContent = session.pinned ? "取消置顶" : "置顶";
+    sessionMenu.classList.remove("is-hidden");
+    const rect = sessionMenu.getBoundingClientRect();
+    sessionMenu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - rect.width - 8))}px`;
+    sessionMenu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - rect.height - 8))}px`;
+  }
+
+  async function applySessionPin(): Promise<void> {
+    const id = menuTargetId;
+    hideSessionMenu();
+    if (!id) return;
+    const target = sessions.find((item) => item.id === id);
+    await workApi.pinSession(id, !target?.pinned);
+    await refreshSessions();
+  }
+
+  async function applySessionMove(delta: -1 | 1): Promise<void> {
+    const id = menuTargetId;
+    hideSessionMenu();
+    if (!id) return;
+    const visibleIdx = sessions.findIndex((item) => item.id === id);
+    if (visibleIdx < 0) return;
+    const neighbor = sessions[visibleIdx + delta];
+    if (!neighbor) return;
+    // 不跨置顶分组移动（置顶与非置顶是两个独立区段）
+    if (Boolean(sessions[visibleIdx].pinned) !== Boolean(neighbor.pinned)) return;
+    // 在当前展示列表内交换相邻项，映射回全局顺序后持久化
+    const fullIds = (await workApi.listSessions()).map((item) => item.id);
+    const a = fullIds.indexOf(id);
+    const b = fullIds.indexOf(neighbor.id);
+    if (a < 0 || b < 0) return;
+    [fullIds[a], fullIds[b]] = [fullIds[b], fullIds[a]];
+    await workApi.reorderSessions(fullIds);
+    await refreshSessions();
+  }
+
+  async function applySessionDelete(): Promise<void> {
+    const id = menuTargetId;
+    hideSessionMenu();
+    if (!id) return;
+    await workApi.deleteSession(id);
+    if (activeSession?.id === id) activeSession = null;
+    await refreshSessions();
   }
 
   function renderMessages(): void {
@@ -192,14 +284,15 @@ export function mountWorkPanel(root: HTMLElement): WorkPanelHandle {
     const body = document.createElement("div");
     body.className = `message__body${message.role === "assistant" ? " msg__bubble" : ""}`;
     if (message.role === "assistant") {
+      // renderMarkdown 返回 { mode, content }：字段名写错会导致助手气泡空白
       const rendered = renderMarkdown(message.content);
-      if (rendered.kind === "html") {
+      if (rendered.mode === "html") {
         const template = document.createElement("template");
-        template.innerHTML = rendered.html;
+        template.innerHTML = rendered.content;
         body.replaceChildren(template.content.cloneNode(true));
         if (body.querySelector("pre, table, .katex-display")) body.classList.add("has-rich-content");
       } else {
-        body.textContent = rendered.text;
+        body.textContent = rendered.content;
       }
     } else {
       body.textContent = message.content;
@@ -209,6 +302,140 @@ export function mountWorkPanel(root: HTMLElement): WorkPanelHandle {
     messagesEl.appendChild(wrapper);
     emptyState.hidden = true;
     messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  /**
+   * 结构化询问卡片（移植自上游 ask_user）：消息流内渲染选项，
+   * 作答只回传 optionId，规范值由主进程解析；已作答/已失效的卡片锁死不可再提交。
+   */
+  function renderAskCard(payload: WorkAskCardPayload): void {
+    if (messagesEl.querySelector(`[data-ask-id="${CSS.escape(payload.interactionId)}"]`)) return;
+    const wrapper = document.createElement("article");
+    wrapper.className = "message message--assistant wp-ask-card";
+    wrapper.dataset.askId = payload.interactionId;
+
+    const meta = document.createElement("div");
+    meta.className = "message__meta";
+    meta.textContent = "Cyrene Work · 需要你确认后再继续";
+
+    const body = document.createElement("div");
+    body.className = "message__body wp-ask-card__body";
+    if (payload.intro) {
+      const intro = document.createElement("p");
+      intro.className = "wp-ask-intro";
+      intro.textContent = payload.intro;
+      body.appendChild(intro);
+    }
+
+    const selections = new Map<string, Set<string>>();
+    const customInputs = new Map<string, HTMLInputElement>();
+    for (const question of payload.questions) {
+      selections.set(question.id, new Set());
+      const block = document.createElement("div");
+      block.className = "wp-ask-question";
+      const prompt = document.createElement("p");
+      prompt.className = "wp-ask-question__prompt";
+      prompt.textContent = question.multiple ? `${question.prompt}（可多选）` : question.prompt;
+      block.appendChild(prompt);
+
+      if (question.options.length) {
+        const optionsWrap = document.createElement("div");
+        optionsWrap.className = "wp-ask-options";
+        for (const option of question.options) {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "wp-ask-option";
+          btn.textContent = option.label;
+          if (option.description) btn.title = option.description;
+          btn.addEventListener("click", () => {
+            const set = selections.get(question.id)!;
+            if (question.multiple) {
+              if (set.has(option.id)) set.delete(option.id);
+              else set.add(option.id);
+            } else {
+              set.clear();
+              set.add(option.id);
+            }
+            optionsWrap.querySelectorAll(".wp-ask-option").forEach((node) => {
+              node.classList.toggle("is-selected", set.has((node as HTMLButtonElement).dataset.optionId ?? ""));
+            });
+          });
+          btn.dataset.optionId = option.id;
+          optionsWrap.appendChild(btn);
+        }
+        block.appendChild(optionsWrap);
+      }
+
+      if (question.customEnabled) {
+        const input = document.createElement("input");
+        input.type = "text";
+        input.className = "wp-ask-custom";
+        input.placeholder = "填写你的回答…";
+        customInputs.set(question.id, input);
+        block.appendChild(input);
+      }
+      body.appendChild(block);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "wp-ask-actions";
+    const note = document.createElement("span");
+    note.className = "wp-ask-note";
+    const submit = document.createElement("button");
+    submit.type = "button";
+    submit.className = "wp-ask-submit";
+    submit.textContent = "提交回答";
+    submit.addEventListener("click", async () => {
+      const answers: WorkAskAnswerSubmission[] = [];
+      for (const question of payload.questions) {
+        const custom = customInputs.get(question.id)?.value.trim() ?? "";
+        const set = selections.get(question.id) ?? new Set<string>();
+        if (question.customEnabled && custom) {
+          answers.push({ questionId: question.id, source: "custom", text: custom });
+        } else if (set.size) {
+          answers.push({ questionId: question.id, source: "option", optionIds: [...set] });
+        } else {
+          note.textContent = "请回答所有问题后再提交";
+          return;
+        }
+      }
+      note.textContent = "";
+      submit.disabled = true;
+      const result = api
+        ? await api.answerAsk({ interactionId: payload.interactionId, answers }).catch(() => null)
+        : null;
+      if (result?.ok) {
+        wrapper.classList.add("is-answered");
+        actions.remove();
+        const done = document.createElement("p");
+        done.className = "wp-ask-note is-done";
+        done.textContent = "已提交，继续执行中…";
+        body.appendChild(done);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      } else {
+        note.textContent = result?.error ?? "提交失败，请重试";
+        submit.disabled = false;
+      }
+    });
+    actions.append(note, submit);
+    body.appendChild(actions);
+
+    wrapper.append(meta, body);
+    messagesEl.appendChild(wrapper);
+    emptyState.hidden = true;
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  /** 运行结束/取消后把未作答的卡片标记失效，避免迟到提交。 */
+  function invalidateStaleAskCards(): void {
+    messagesEl.querySelectorAll<HTMLElement>(".wp-ask-card:not(.is-answered):not(.is-stale)").forEach((card) => {
+      card.classList.add("is-stale");
+      card.querySelectorAll("button, input").forEach((control) => { (control as HTMLButtonElement | HTMLInputElement).disabled = true; });
+      const note = document.createElement("p");
+      note.className = "wp-ask-note is-done";
+      note.textContent = "本次询问已失效";
+      card.querySelector(".message__body")?.appendChild(note);
+    });
   }
 
   function renderMessageAttachments(attachments: WorkAttachment[]): HTMLElement {
@@ -248,7 +475,7 @@ export function mountWorkPanel(root: HTMLElement): WorkPanelHandle {
     if (files.length === 0 || running) return;
     attachBtn.disabled = true;
     try {
-      const results = await api.ingestDroppedFiles(files);
+      const results = await workApi.ingestDroppedFiles(files);
       attachedFiles = [...attachedFiles, ...results];
       updateFileTags();
     } catch (error) {
@@ -311,17 +538,17 @@ export function mountWorkPanel(root: HTMLElement): WorkPanelHandle {
 
   async function refreshSessions(): Promise<void> {
     // 会话懒创建：只列出当前模式的会话；无会话时空态引导，不自动创建
-    const all = await api.listSessions();
+    const all = await workApi.listSessions();
     sessions = sessionsForMode(all, currentMode);
     if (activeSession && (activeSession.mode ?? "work") !== currentMode) activeSession = null;
-    if (!activeSession && sessions.length) activeSession = await api.getSession(sessions[0].id);
+    if (!activeSession && sessions.length) activeSession = await workApi.getSession(sessions[0].id);
     renderSessionList();
     renderCurrentSession();
   }
 
   async function openSession(id: string): Promise<void> {
     if (running) return;
-    activeSession = await api.getSession(id);
+    activeSession = await workApi.getSession(id);
     renderSessionList();
     renderCurrentSession();
   }
@@ -357,7 +584,7 @@ export function mountWorkPanel(root: HTMLElement): WorkPanelHandle {
   async function createNewSession(): Promise<void> {
     // 当前模式直接创建，不再弹三选一弹窗；目录绑定与创建解耦，
     // code/learn 会话建好后通过"绑定目录"按钮随时绑定
-    activeSession = await api.createSession(
+    activeSession = await workApi.createSession(
       currentMode === "work" ? undefined : { mode: currentMode },
     );
     await refreshSessions();
@@ -389,7 +616,22 @@ export function mountWorkPanel(root: HTMLElement): WorkPanelHandle {
   composer.addEventListener("submit", async (event) => {
     event.preventDefault();
     const text = inputEl.value.trim();
-    if ((!text && attachedFiles.length === 0) || !activeSession || running) return;
+    if (!text && attachedFiles.length === 0) return;
+    // 上一轮还在跑：给明确反馈而不是静默吞掉输入（“发了没反应”的主因之一）
+    if (running) {
+      runtimeStatus.textContent = "上一轮还在执行，可点取消后再发";
+      return;
+    }
+    // 无活动会话时自动创建，不再静默丢弃消息
+    if (!activeSession) {
+      try {
+        await createNewSession();
+      } catch (error) {
+        addActivity(`创建会话失败：${error instanceof Error ? error.message : String(error)}`, true);
+        return;
+      }
+      if (!activeSession) return;
+    }
     const filesForThisTurn = [...attachedFiles];
     running = true;
     sendBtn.disabled = true;
@@ -495,6 +737,7 @@ export function mountWorkPanel(root: HTMLElement): WorkPanelHandle {
   });
 
   cancelBtn.addEventListener("click", () => {
+    invalidateStaleAskCards();
     if (activeSession) void api.cancel(activeSession.id);
   });
 
@@ -515,12 +758,17 @@ export function mountWorkPanel(root: HTMLElement): WorkPanelHandle {
       case "message":
         appendMessageElement(event.message);
         break;
+      case "ask_card":
+        renderAskCard(event.payload);
+        runtimeStatus.textContent = "等待你作答询问卡片";
+        break;
       case "error":
         addActivity(event.message, true);
         runtimeStatus.textContent = "执行失败";
         break;
       case "done":
         running = false;
+        invalidateStaleAskCards();
         sendBtn.disabled = false;
         attachBtn.disabled = false;
         cancelBtn.hidden = true;

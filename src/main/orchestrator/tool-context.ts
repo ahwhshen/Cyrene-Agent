@@ -3,6 +3,7 @@
 // 地基通用：当前只服务于 read_image（视觉），未来其他工具按需声明 needsContext 接入。
 
 import type { ChatMessage } from "./vendors";
+import type { ChatSessionMode } from "../../shared/chat-types";
 
 /** 工具上下文。userQuery 是当前唯一稳定字段；metadata 留未来扩展（PDF/音频等），现在不填。 */
 export interface ToolContext {
@@ -12,6 +13,12 @@ export interface ToolContext {
   conversationId?: string;
   /** 未来扩展兜底；当前为空对象，不预设字段。遵循"地基通用，上层克制"。 */
   metadata?: Record<string, unknown>;
+  /** 会话所属模式（上游 Code 模式增强移植）；git/LSP 工具只在 "code" 下放行。 */
+  mode?: ChatSessionMode;
+  /** Code 模式绑定的工作目录绝对路径（上游 Code 模式增强移植）；git/LSP 工具的沙箱边界。 */
+  resolvedWorkspaceRoot?: string;
+  /** 工具执行取消信号（上游 Code 模式增强移植）；不填则不限时。 */
+  signal?: AbortSignal;
 }
 
 /**

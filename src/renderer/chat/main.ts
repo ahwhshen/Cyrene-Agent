@@ -134,6 +134,10 @@ interface ChatApi {
     getEnabledStickers?: () => Promise<Array<{ id: string; src: string; description?: string }>>;
     /** 外部入口（侧边栏"工作"按钮）指示切到指定模式视图。 */
     onSetMode?: (callback: (mode: string) => void) => () => void;
+    /** 截图助手：发起截图（原生助手缺失时返回 ok:false）。 */
+    startScreenshot?: () => Promise<{ ok: boolean; reason?: string }>;
+    /** 截图完成后的插入载荷订阅（previewUrl 为 data URL）。 */
+    onScreenshotInsert?: (callback: (data: { mime: "image/png"; width: number; height: number; filePath: string; previewUrl: string; hasAnnotations: boolean }) => void) => () => void;
   }
 
 /** AG-UI 事件流 API（window.agui）。 */
@@ -903,6 +907,29 @@ document.getElementById("rcm-pin")?.addEventListener("click", async () => {
     void renderRailList();
   }
 });
+
+// 上移/下移：在当前列表内交换相邻项（不跨置顶分组），复用 reorder 持久化
+async function moveRailSession(delta: -1 | 1): Promise<void> {
+  const menu = document.getElementById("rail-context-menu");
+  const sessionId = menu?.dataset.sessionId;
+  if (!sessionId) return;
+  hideRailContextMenu();
+  if (sending || deleting) return;
+  const sessions = await window.chatStore?.list();
+  if (!sessions) return;
+  const idx = sessions.findIndex(s => s.id === sessionId);
+  if (idx < 0) return;
+  const neighbor = sessions[idx + delta];
+  if (!neighbor) return;
+  if (Boolean(sessions[idx].pinned) !== Boolean(neighbor.pinned)) return;
+  const ids = sessions.map(s => s.id);
+  [ids[idx], ids[idx + delta]] = [ids[idx + delta], ids[idx]];
+  await window.chatStore?.reorder(ids);
+  void renderRailList();
+}
+
+document.getElementById("rcm-up")?.addEventListener("click", () => { void moveRailSession(-1); });
+document.getElementById("rcm-down")?.addEventListener("click", () => { void moveRailSession(1); });
 
 // loader 按钮 toggle 侧栏显隐
 chatStatusBtn?.addEventListener("click", () => {
@@ -4096,6 +4123,33 @@ async function ingestDroppedFiles(files: File[]): Promise<void> {
 	attachBtn?.addEventListener("click", () => {
 	  fileInput?.click();
 	});
+
+/* ===== 截图助手（上游新增）=====
+   聊天按钮发起区域截图 → main 回传插入载荷 → 复用粘贴图片摄入链入附件。
+   全局热键 Alt+Shift+S 截图到剪贴板，用户直接 Ctrl+V 粘贴即可（走既有 paste 链）。 */
+const screenshotBtn = document.getElementById("screenshot-btn") as HTMLButtonElement | null;
+screenshotBtn?.addEventListener("click", async () => {
+  const res = await window.chat?.startScreenshot?.();
+  if (res && !res.ok && res.reason !== "SCREENSHOT_CANCELLED") {
+    window.alert("截图失败：" + res.reason);
+  }
+});
+window.chat?.onScreenshotInsert?.((data) => {
+  // previewUrl 是 data:image/png;base64,...，取 base64 段复用粘贴摄入链
+  const base64 = data.previewUrl.split(",")[1];
+  if (!base64 || !window.chat?.ingestPastedImage) return;
+  void (async () => {
+    try {
+      const att = await window.chat!.ingestPastedImage!(base64, data.mime);
+      if (att) {
+        attachedFiles = [...attachedFiles, att];
+        updateFileTags();
+      }
+    } catch (err: unknown) {
+      window.alert("截图插入失败：" + ((err as Error)?.message || String(err)));
+    }
+  })();
+});
 	
 	fileInput?.addEventListener("change", () => {
 	  if (fileInput.files && fileInput.files.length > 0) {
@@ -4800,6 +4854,6 @@ cspSettingsBtn?.addEventListener("click", () => {
   window.sidebar?.openSettings("api");
 });
 cspGameBtn?.addEventListener("click", () => {
-  // 独立插件控制台页已删除，「插件」直进设置页插件栏
-  window.sidebar?.openSettings("pluginpacks");
+  // 插件管理已改为独立窗口（设置页不再有插件选项卡）
+  window.sidebar?.openPluginPanel();
 });

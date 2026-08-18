@@ -13,7 +13,18 @@ function form(id: string): string {
 describe("appearance settings markup", () => {
   it("adds appearance navigation and renames general settings", () => {
     expect(html).toContain('data-section="appearance"');
-    expect(html).toContain('data-section="general"><span>⚙️</span>通用设置');
+    expect(html).toMatch(/data-section="general">[\s\S]*?nav-icon[\s\S]*?通用设置/);
+  });
+
+  it("renders every nav icon as a theme-aware currentColor SVG (no fixed-color emoji)", () => {
+    const navMatch = html.match(/<nav class="settings-nav__list">[\s\S]*?<\/nav>/);
+    expect(navMatch).not.toBeNull();
+    const nav = navMatch![0];
+    const itemCount = (nav.match(/class="nav-item/g) ?? []).length;
+    const iconCount = (nav.match(/stroke="currentColor"/g) ?? []).length;
+    expect(itemCount).toBeGreaterThan(0);
+    expect(iconCount).toBe(itemCount);
+    expect(nav).not.toMatch(/<span>[^<]+<\/span>/);
   });
 
   it("contains the four appearance groups and disabled future options", () => {

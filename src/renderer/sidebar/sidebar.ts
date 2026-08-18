@@ -39,6 +39,7 @@ interface SidebarApi {
   openSettings: (section?: string) => void;
   openCall: () => void;
   openWork: () => void;
+  openPluginPanel: () => void;
 }
 
 declare global {
@@ -60,6 +61,7 @@ if (!window.sidebar) {
     openSettings: (_section?: string) => {},
     openCall: () => {},
     openWork: () => {},
+    openPluginPanel: () => {},
   };
 }
 
@@ -209,13 +211,13 @@ settingsBtn.addEventListener("click", () => {
 });
 
 gameBtn.addEventListener("click", () => {
-  // 独立插件控制台页已删除，「插件」直进设置页插件栏
-  window.sidebar?.openSettings("pluginpacks");
+  // 插件管理已改为独立窗口（设置页不再有插件选项卡）
+  window.sidebar?.openPluginPanel();
 });
 
 modelSwitchBtn.addEventListener("click", () => {
-  // “插件”直奔设置页的插件栏（扩展插件包管理）
-  window.sidebar?.openSettings("pluginpacks");
+  // 「插件」打开独立插件面板窗口（扩展插件包管理）
+  window.sidebar?.openPluginPanel();
 });
 
 callBtn.addEventListener("click", () => {

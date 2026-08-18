@@ -200,6 +200,10 @@ interface ModelSettings {
   stickerEnabled: boolean;
   stickerSize: "small" | "standard" | "large";
   stickerSimilarityThreshold: number;
+  /** DMAE 工作记忆总开关（默认关）。 */
+  memoryDmaeEnabled?: boolean;
+  /** 梦境蒸馏总开关（默认关）。 */
+  memoryDreamEnabled?: boolean;
   vision?: {
     syncWithMain: boolean;
     baseUrl: string;
@@ -675,7 +679,11 @@ const closeBtn = document.getElementById("close-btn") as HTMLButtonElement;
 const clickSound = new Audio("../audio/click.mp3");
 clickSound.preload = "auto";
 
+<<<<<<< Updated upstream
 // 背景音乐：内置 bgm.mp3（随仓库分发；本地可自行替换为其他音源）
+=======
+// 背景音乐：音乐文件夹里的《昔涟》（张韶涵HOYO-MiX）
+>>>>>>> Stashed changes
 const bgmAudio = new Audio("../audio/bgm.mp3");
 bgmAudio.preload = "auto";
 bgmAudio.loop = true;
@@ -794,6 +802,8 @@ let activeProvider: string = "";
 const runtimeSyncSelect = document.getElementById("runtime-sync") as HTMLElement;
 const runtimeSyncNote = document.getElementById("runtime-sync-note") as HTMLElement;
 const stickerEnabledInput = document.getElementById("sticker-enabled") as HTMLInputElement;
+const memoryDmaeEnabledInput = document.getElementById("memory-dmae-enabled") as HTMLInputElement;
+const memoryDreamEnabledInput = document.getElementById("memory-dream-enabled") as HTMLInputElement;
 const stickerSizeSelect = document.getElementById("sticker-size") as HTMLElement;
 const musicEnabledInput = document.getElementById("music-enabled") as HTMLInputElement;
 const musicVolumeInput = document.getElementById("music-volume") as HTMLInputElement;
@@ -837,7 +847,6 @@ const NAV_LABELS: Record<string, { emoji: string; title: string; hint: string }>
   identity: { emoji: "💼", title: "职位", hint: "自定义昔涟的身份定位与工作职责" },
   skills: { emoji: "✨", title: "Skill", hint: "管理 agent 的 skill 指令（约束如何用工具）" },
   plugins: { emoji: "🧩", title: "功能", hint: "昔涟内置的核心工具能力；关闭后调度层不会使用对应工具" },
-  pluginpacks: { emoji: "🔌", title: "插件", hint: "扩展插件包：启动时自动扫描，支持独立界面与声明式配置" },
   preferences: { emoji: "🫧", title: "偏好设置", hint: "设置聊天窗口和输出行为的默认偏好" },
   appearance: { emoji: "🎨", title: "外观设置", hint: "调整窗口布局、界面主题与昔涟桌宠" },
   general: { emoji: "⚙️", title: "通用设置", hint: "管理窗口、音频和系统行为" },
@@ -1443,6 +1452,8 @@ async function loadConfig(): Promise<void> {
     renderApiTarget(initialApiTarget);
     applyRuntimeSyncSelection(cfg.runtimeSync);
     stickerEnabledInput.checked = cfg.stickerEnabled !== false;
+    memoryDmaeEnabledInput.checked = cfg.memoryDmaeEnabled === true;
+    memoryDreamEnabledInput.checked = cfg.memoryDreamEnabled === true;
     applyStickerSizeSelection(cfg.stickerSize);
     const threshold = cfg.stickerSimilarityThreshold ?? 0.55;
     stickerThresholdInput.value = String(threshold);
@@ -1510,6 +1521,14 @@ runtimeSyncSelect.querySelectorAll<HTMLButtonElement>(".option-block").forEach((
 });
 
 stickerEnabledInput.addEventListener("change", () => {
+  setCyreneSaveStatus("有未保存的更改");
+});
+
+memoryDmaeEnabledInput.addEventListener("change", () => {
+  setCyreneSaveStatus("有未保存的更改");
+});
+
+memoryDreamEnabledInput.addEventListener("change", () => {
   setCyreneSaveStatus("有未保存的更改");
 });
 
@@ -2862,7 +2881,7 @@ cyrenePanel.addEventListener("submit", async (e) => {
   e.preventDefault();
   setCyreneSaveStatus("保存中…");
   try {
-    await window.settings!.saveConfig({ runtimeSync: getRuntimeSyncValue(), stickerEnabled: stickerEnabledInput.checked, stickerSize: getStickerSizeValue(), stickerSimilarityThreshold: parseFloat(stickerThresholdInput.value) });
+    await window.settings!.saveConfig({ runtimeSync: getRuntimeSyncValue(), stickerEnabled: stickerEnabledInput.checked, stickerSize: getStickerSizeValue(), stickerSimilarityThreshold: parseFloat(stickerThresholdInput.value), memoryDmaeEnabled: memoryDmaeEnabledInput.checked, memoryDreamEnabled: memoryDreamEnabledInput.checked });
     setCyreneSaveStatus("已保存", "is-ok");
   } catch {
     setCyreneSaveStatus("保存失败", "is-error");
@@ -3114,7 +3133,6 @@ function switchSection(section: string): void {
   const isTasks = section === "tasks";
   const isIdentity = section === "identity";
   const isPlugins = section === "plugins";
-  const isPluginPacks = section === "pluginpacks";
   const isSkills = section === "skills";
   const isTokens = section === "tokens";
   const isChannels = section === "channels";
@@ -3142,9 +3160,6 @@ function switchSection(section: string): void {
   const identityPanel = document.getElementById("identity-panel");
   if (identityPanel) identityPanel.classList.toggle("is-hidden", !isIdentity);
   pluginsPanel.classList.toggle("is-hidden", !isPlugins);
-  const pluginPacksPanel = document.getElementById("pluginpacks-panel");
-  if (pluginPacksPanel) pluginPacksPanel.classList.toggle("is-hidden", !isPluginPacks);
-  if (isPluginPacks) void loadPluginPacksPanel();
   const skillsPanel = document.getElementById("skills-panel");
   if (skillsPanel) skillsPanel.classList.toggle("is-hidden", !isSkills);
   if (isSkills) void renderSkills();
@@ -3166,7 +3181,7 @@ function switchSection(section: string): void {
   if (isSync) void loadSyncPanel();
   placeholderPanel.classList.toggle(
     "is-hidden",
-    isApi || isAppearance || isGeneral || isPreferences || isCyrene || isDisclaimer || isMemory || isUser || isChat || isTasks || isIdentity || isPlugins || isPluginPacks || isSkills || isTokens || isChannels || isTts || isAsr || isMusic || isSync,
+    isApi || isAppearance || isGeneral || isPreferences || isCyrene || isDisclaimer || isMemory || isUser || isChat || isTasks || isIdentity || isPlugins || isSkills || isTokens || isChannels || isTts || isAsr || isMusic || isSync,
   );
 
   if (
@@ -3182,7 +3197,6 @@ function switchSection(section: string): void {
     !isTasks &&
     !isIdentity &&
     !isPlugins &&
-    !isPluginPacks &&
     !isSkills &&
     !isTokens &&
     !isChannels &&
@@ -4981,271 +4995,6 @@ async function renderSkills(): Promise<void> {
 }
 
 
-
-
-/* ============================================================
-   🔌 插件栏：插件包列表（外部扩展通道）
-   - 启动时主进程扫描 appPath/plugins + userData/plugins
-   - 卡片：开关 + 风险声明 + 管理员徽标；window 模式带「打开界面」按钮
-   - settingsSchema 自动渲染配置表单（支持 visibleWhen 条件显隐）
-   - requiresAdmin 且未提权时弹警告框，确认后提权重启
-   ============================================================ */
-
-type PluginPackView = Awaited<ReturnType<NonNullable<SettingsApi["listPlugins"]>>>[number];
-type PluginPackField = PluginPackView["settingsSchema"][number];
-
-let pluginAdminPendingId: string | null = null;
-
-/** 管理员警告框（cy-modal 风格，HTML 在 index.html）。 */
-function showPluginAdminWarning(pack: PluginPackView): void {
-  const overlay = document.getElementById("plugin-admin-overlay");
-  const body = document.getElementById("plugin-admin-body");
-  if (!overlay || !body) return;
-  pluginAdminPendingId = pack.id;
-  const riskText = ["需要管理员身份运行", ...pack.risk.map((r) => `权限声明：${r}`)].join("\n");
-  body.textContent = `插件「${pack.name}」声明需要管理员权限。以管理员身份运行将使该插件获得系统级操作能力，请确认插件来源可信。\n\n${riskText}`;
-  overlay.classList.remove("is-hidden");
-}
-
-function hidePluginAdminWarning(): void {
-  document.getElementById("plugin-admin-overlay")?.classList.add("is-hidden");
-  pluginAdminPendingId = null;
-}
-
-document.getElementById("plugin-admin-confirm")?.addEventListener("click", () => {
-  hidePluginAdminWarning();
-  void window.settings?.relaunchAsAdmin?.();
-});
-document.getElementById("plugin-admin-cancel")?.addEventListener("click", () => {
-  hidePluginAdminWarning();
-  void loadPluginPacksPanel();  // 刷新开关回退态
-});
-
-/** 判断 visibleWhen 条件是否满足。 */
-function pluginFieldVisible(field: PluginPackField, values: Record<string, unknown>): boolean {
-  if (!field.visibleWhen) return true;
-  return values[field.visibleWhen.key] === field.visibleWhen.equals;
-}
-
-/** 构建统一样式的开关（.switch 结构，与全工程其他开关项保持一致）。 */
-function buildPluginSwitch(checked: boolean, onChange: (next: boolean) => void): { root: HTMLElement; input: HTMLInputElement } {
-  const root = document.createElement("span");
-  root.className = "switch";
-  const input = document.createElement("input");
-  input.type = "checkbox";
-  input.checked = checked;
-  input.addEventListener("change", () => onChange(input.checked));
-  const track = document.createElement("span");
-  track.className = "switch__track";
-  const thumb = document.createElement("span");
-  thumb.className = "switch__thumb";
-  track.appendChild(thumb);
-  root.appendChild(input);
-  root.appendChild(track);
-  return { root, input };
-}
-
-/** 渲染单个 schema 字段的输入控件。 */
-function renderPluginFieldControl(field: PluginPackField, value: unknown, onInput: (v: unknown) => void): HTMLElement {
-  const wrap = document.createElement("div");
-  wrap.className = "pluginpack-field";
-  wrap.dataset.fieldKey = field.key;
-
-  const label = document.createElement("label");
-  label.className = "pluginpack-field__label";
-  label.textContent = field.label;
-  wrap.appendChild(label);
-
-  if (field.type === "checkbox") {
-    // 开关类设置项一律用统一 .switch 开关，仿照其他设置项
-    const { root } = buildPluginSwitch(value === true, (next) => onInput(next));
-    wrap.appendChild(root);
-    return wrap;
-  }
-
-  if (field.type === "select") {
-    const select = document.createElement("select");
-    select.className = "pluginpack-field__input";
-    for (const opt of field.options ?? []) {
-      const o = document.createElement("option");
-      o.value = opt.value;
-      o.textContent = opt.label;
-      select.appendChild(o);
-    }
-    select.value = typeof value === "string" ? value : (field.options?.[0]?.value ?? "");
-    select.addEventListener("change", () => onInput(select.value));
-    wrap.appendChild(select);
-    return wrap;
-  }
-
-  const input = document.createElement("input");
-  input.className = "pluginpack-field__input";
-  input.type = field.type === "number" ? "number" : field.secret ? "password" : "text";
-  input.placeholder = field.placeholder ?? "";
-  input.value = value == null ? "" : String(value);
-  input.addEventListener("change", () => {
-    onInput(field.type === "number" ? Number(input.value) : input.value);
-  });
-  wrap.appendChild(input);
-  return wrap;
-}
-
-/** 渲染一张插件卡片（含声明式配置表单）。 */
-function renderPluginPackCard(pack: PluginPackView): HTMLElement {
-  const card = document.createElement("article");
-  card.className = "pluginpack-card";
-
-  // 头部：图标 + 名称/描述 + 徽标 + 开关
-  const head = document.createElement("div");
-  head.className = "pluginpack-card__head";
-
-  const icon = document.createElement("div");
-  icon.className = "pluginpack-card__icon";
-  if (pack.iconUrl) {
-    // 插件自带图标（清单 icon 声明，扫描时已校验存在）
-    const img = document.createElement("img");
-    img.className = "pluginpack-card__icon-img";
-    img.src = pack.iconUrl;
-    img.alt = pack.name;
-    icon.appendChild(img);
-  } else {
-    icon.textContent = pack.uiMode === "window" ? "🪟" : "🧩";
-  }
-
-  const info = document.createElement("div");
-  info.className = "pluginpack-card__info";
-  const title = document.createElement("h2");
-  title.className = "pluginpack-card__title";
-  title.textContent = pack.name;
-  const meta = document.createElement("div");
-  meta.className = "pluginpack-card__meta";
-  const badges: string[] = [`v${pack.version}`, pack.source === "user" ? "用户插件" : "内置"];
-  if (pack.requiresAdmin) badges.push("🛡️ 需管理员");
-  if (pack.uiMode === "window") {
-      // 窗口启动策略徽标：new=新建窗口 / background=后台静默 / reuse=复用拉伸（默认）
-      if (pack.windowPolicy === "background") badges.push("后台静默");
-      else if (pack.windowPolicy === "new") badges.push("每次新建窗口");
-      else badges.push("独立界面");
-    }
-  for (const risk of pack.risk) badges.push(risk);
-  meta.textContent = badges.join(" · ");
-  const desc = document.createElement("p");
-  desc.className = "pluginpack-card__desc";
-  desc.textContent = pack.description;
-  info.appendChild(title);
-  info.appendChild(meta);
-  info.appendChild(desc);
-
-  const actions = document.createElement("div");
-  actions.className = "pluginpack-card__actions";
-
-  if (pack.uiMode === "window" && pack.windowPolicy !== "background") {
-    const openBtn = document.createElement("button");
-    openBtn.type = "button";
-    openBtn.className = "pluginpack-open-btn";
-    openBtn.textContent = "打开界面";
-    openBtn.disabled = !pack.enabled;
-    openBtn.addEventListener("click", async () => {
-      const result = await window.settings?.openPluginWindow?.(pack.id);
-      if (result && !result.ok) console.warn("[settings] 打开插件窗口失败:", result.error);
-    });
-    actions.appendChild(openBtn);
-  }
-
-  const { root: toggleRoot, input: toggle } = buildPluginSwitch(pack.enabled, async (next) => {
-    const result = await window.settings?.setPluginEnabled?.(pack.id, next);
-    if (!result?.ok) {
-      toggle.checked = !next;
-      if (result?.error === "needs-admin") showPluginAdminWarning(pack);
-      else console.warn("[settings] 切换插件失败:", result?.error);
-    } else {
-      void loadPluginPacksPanel();  // 刷新 loaded/错误态与窗口按钮可用性
-    }
-  });
-  actions.appendChild(toggleRoot);
-
-  head.appendChild(icon);
-  head.appendChild(info);
-  head.appendChild(actions);
-  card.appendChild(head);
-
-  // 加载失败提示（异常隔离，不影响其他插件）
-  if (pack.enabled && !pack.loaded && pack.loadError && pack.loadError !== "needs-admin") {
-    const err = document.createElement("div");
-    err.className = "pluginpack-card__error";
-    err.textContent = `加载失败（已隔离）：${pack.loadError}`;
-    card.appendChild(err);
-  }
-  if (pack.loadError === "needs-admin") {
-    const warn = document.createElement("div");
-    warn.className = "pluginpack-card__warn";
-    warn.textContent = "需要管理员身份：开启开关后按提示以管理员重启应用";
-    card.appendChild(warn);
-  }
-
-  // 声明式配置表单（schema 自动渲染，含 visibleWhen）
-  if (pack.settingsSchema.length > 0) {
-    const form = document.createElement("div");
-    form.className = "pluginpack-form";
-    const values: Record<string, unknown> = { ...pack.settings };
-    const fieldWraps: Array<{ field: PluginPackField; el: HTMLElement }> = [];
-    let currentSection = "";
-
-    const persist = (): void => {
-      void window.settings?.setPluginSettings?.(pack.id, values);
-    };
-    const refreshVisibility = (): void => {
-      for (const { field, el } of fieldWraps) {
-        el.classList.toggle("is-hidden", !pluginFieldVisible(field, values));
-      }
-    };
-
-    for (const field of pack.settingsSchema) {
-      if (field.section && field.section !== currentSection) {
-        currentSection = field.section;
-        const sectionTitle = document.createElement("div");
-        sectionTitle.className = "pluginpack-form__section";
-        sectionTitle.textContent = currentSection;
-        form.appendChild(sectionTitle);
-      }
-      const el = renderPluginFieldControl(field, values[field.key], (v) => {
-        values[field.key] = v;
-        refreshVisibility();
-        persist();
-      });
-      el.classList.toggle("is-hidden", !pluginFieldVisible(field, values));
-      fieldWraps.push({ field, el });
-      form.appendChild(el);
-    }
-    card.appendChild(form);
-  }
-
-  return card;
-}
-
-/** 拉取插件列表并渲染整个插件栏。 */
-async function loadPluginPacksPanel(): Promise<void> {
-  const listEl = document.getElementById("pluginpacks-list");
-  const emptyEl = document.getElementById("pluginpacks-empty");
-  if (!listEl || !window.settings?.listPlugins) return;
-
-  let packs: PluginPackView[] = [];
-  try {
-    packs = await window.settings.listPlugins();
-  } catch (err) {
-    console.warn("[settings] 加载插件列表失败:", err);
-  }
-
-  listEl.innerHTML = "";
-  if (packs.length === 0) {
-    emptyEl?.classList.remove("is-hidden");
-    return;
-  }
-  emptyEl?.classList.add("is-hidden");
-  for (const pack of packs) {
-    listEl.appendChild(renderPluginPackCard(pack));
-  }
-}
 
 
 

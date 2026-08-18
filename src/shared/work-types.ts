@@ -1,3 +1,5 @@
+import type { WorkAskCardPayload } from "./work-ask-types";
+
 export type WorkMessageRole = "user" | "assistant" | "system";
 
 export interface WorkAttachment {
@@ -71,6 +73,8 @@ export interface WorkSessionMeta {
   status: WorkSession["status"];
   messageCount: number;
   mode?: WorkSessionMode;
+  /** 置顶会话排到列表最前（与聊天侧会话栏语义一致）。 */
+  pinned?: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -109,5 +113,7 @@ export type WorkRunEvent =
   | { type: "tool_start"; toolId: string; label: string }
   | { type: "tool_end"; toolId: string; ok: boolean; summary: string }
   | { type: "message"; message: WorkMessage }
+  /** 结构化询问卡片：渲染层渲染选项并作答，经 WORK_ASK_ANSWER 回传。 */
+  | { type: "ask_card"; payload: WorkAskCardPayload }
   | { type: "error"; message: string }
   | { type: "done"; sessionId: string };

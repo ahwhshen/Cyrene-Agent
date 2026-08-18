@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { IPC } from "../shared/ipc-channels";
+import type { ScreenshotInsertPayload } from "../shared/ipc-channels";
 import type { UiTheme } from "../shared/ui-theme";
 import type { UiFont } from "../shared/ui-font";
 import type { GptsovitsSynthesizeRequest } from "../shared/tts-types";
@@ -84,6 +85,14 @@ const chatApi = {
     ipcRenderer.on(IPC.CHAT_SET_MODE, listener);
     return () => ipcRenderer.removeListener(IPC.CHAT_SET_MODE, listener);
   },
+  /** 截图助手：从聊天按钮发起截图，完成后经 SCREENSHOT_INSERT 回传插入载荷。 */
+  startScreenshot: () =>
+    ipcRenderer.invoke(IPC.SCREENSHOT_START) as Promise<{ ok: boolean; reason?: string }>,
+  onScreenshotInsert: (callback: (data: ScreenshotInsertPayload) => void) => {
+    const listener = (_e: unknown, data: ScreenshotInsertPayload) => callback(data);
+    ipcRenderer.on(IPC.SCREENSHOT_INSERT, listener);
+    return () => ipcRenderer.removeListener(IPC.SCREENSHOT_INSERT, listener);
+  },
 };
 
 contextBridge.exposeInMainWorld("cyrene", cyreneApi);
@@ -96,6 +105,8 @@ const workApi = {
     ipcRenderer.invoke(IPC.WORK_SESSIONS_CREATE, options),
   renameSession: (id: string, title: string) => ipcRenderer.invoke(IPC.WORK_SESSIONS_RENAME, { id, title }),
   deleteSession: (id: string) => ipcRenderer.invoke(IPC.WORK_SESSIONS_DELETE, id),
+  pinSession: (id: string, pinned: boolean) => ipcRenderer.invoke(IPC.WORK_SESSIONS_PIN, { id, pinned }),
+  reorderSessions: (orderedIds: string[]) => ipcRenderer.invoke(IPC.WORK_SESSIONS_REORDER, orderedIds),
   openFolder: () => ipcRenderer.invoke(IPC.WORK_OPEN_FOLDER),
   selectDir: () => ipcRenderer.invoke(IPC.WORK_SELECT_DIR),
   bindDir: (id: string, boundDir?: string) => ipcRenderer.invoke(IPC.WORK_SESSIONS_BIND_DIR, { id, boundDir }),
@@ -120,6 +131,8 @@ const workApi = {
   run: (sessionId: string, text: string, attachments: unknown[] = []) =>
     ipcRenderer.invoke(IPC.WORK_RUN, { sessionId, text, attachments }),
   cancel: (sessionId: string) => ipcRenderer.invoke(IPC.WORK_CANCEL, sessionId),
+  /** 结构化询问卡片作答回传。 */
+  answerAsk: (submission: unknown) => ipcRenderer.invoke(IPC.WORK_ASK_ANSWER, submission),
   onEvent: (callback: (event: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, workEvent: unknown) => callback(workEvent);
     ipcRenderer.on(IPC.WORK_EVENT, listener);
@@ -195,6 +208,7 @@ const sidebarApi = {
   openSettings: (section?: string) => ipcRenderer.send(IPC.SIDEBAR_OPEN_SETTINGS, section),
   openCall: () => ipcRenderer.send(IPC.SIDEBAR_OPEN_CALL),
   openWork: () => ipcRenderer.send(IPC.SIDEBAR_OPEN_WORK),
+  openPluginPanel: () => ipcRenderer.send(IPC.PLUGIN_PANEL_OPEN),
 };
 
 const tasksApi = {
@@ -209,6 +223,18 @@ const tasksApi = {
 
 contextBridge.exposeInMainWorld("sidebar", sidebarApi);
 contextBridge.exposeInMainWorld("tasks", tasksApi);
+
+// 独立插件面板窗口 API（插件列表/开关/配置复用插件系统 IPC）
+const pluginPanelApi = {
+  minimize: () => ipcRenderer.send(IPC.PLUGIN_PANEL_MINIMIZE),
+  close: () => ipcRenderer.send(IPC.PLUGIN_PANEL_CLOSE),
+  listPlugins: () => ipcRenderer.invoke(IPC.PLUGIN_LIST),
+  setPluginEnabled: (id: string, enabled: boolean) => ipcRenderer.invoke(IPC.PLUGIN_SET_ENABLED, { id, enabled }),
+  setPluginSettings: (id: string, settings: Record<string, unknown>) => ipcRenderer.invoke(IPC.PLUGIN_SET_SETTINGS, { id, settings }),
+  openPluginWindow: (id: string) => ipcRenderer.invoke(IPC.PLUGIN_OPEN_WINDOW, { id }),
+  relaunchAsAdmin: () => ipcRenderer.invoke(IPC.PLUGIN_RELAUNCH_ADMIN),
+};
+contextBridge.exposeInMainWorld("pluginPanel", pluginPanelApi);
 
 // 通话窗口 API
 const callApi = {

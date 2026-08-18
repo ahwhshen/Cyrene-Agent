@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { IPC } from "../../shared/ipc-channels";
 import type { WorkAttachment, WorkMessage, WorkRunAttachment, WorkRunEvent, WorkSessionMode } from "../../shared/work-types";
+import type { WorkAskSubmission } from "../../shared/work-ask-types";
 import type { ToolDefinition } from "../orchestrator/tool-registry";
 import type { VendorConfig } from "../orchestrator/vendors";
 import { decodeTextBuffer, hasUtf16Bom, isBinary, isDocumentExt } from "../rag/file-ingest";
@@ -18,7 +19,9 @@ import {
   getWorkSession,
   listWorkSessions,
   openWorkFolder,
+  pinWorkSession,
   renameWorkSession,
+  reorderWorkSessions,
   updateWorkExecutionState,
   workSessionMode,
 } from "./work-store";
@@ -35,6 +38,26 @@ export interface RegisterWorkIpcDeps {
 const activeRuns = new Map<string, AbortController>();
 const MAX_ATTACHMENT_CONTEXT_CHARS = 60_000;
 const MAX_WORK_DOCUMENT_BYTES = 5 * 1024 * 1024;
+
+// ── 结构化询问卡片往返（移植自上游 ask_user 机制）──
+// 发布状态（规范值映射）留在 work-agent 侧；这里只挂 interactionId → 待解 Promise。
+const WORK_ASK_TIMEOUT_MS = 900_000; // 作答等待 15 分钟（确认类卡片用户可能暂时走开），超时降级为文本暂停询问
+interface PendingAsk {
+  sessionId: string;
+  resolve: (submission: WorkAskSubmission) => void;
+  timer: NodeJS.Timeout;
+}
+const pendingAsks = new Map<string, PendingAsk>();
+
+/** 会话取消/结束时清理未作答的卡片，避免泄漏与迟到作答。 */
+function dropPendingAsksForSession(sessionId: string): void {
+  for (const [interactionId, pending] of pendingAsks) {
+    if (pending.sessionId === sessionId) {
+      clearTimeout(pending.timer);
+      pendingAsks.delete(interactionId);
+    }
+  }
+}
 
 function processWorkDocuments(value: unknown): Array<Record<string, unknown>> {
   const paths = value && typeof value === "object" && Array.isArray((value as { filePaths?: unknown }).filePaths)
@@ -148,6 +171,15 @@ export function registerWorkIpc(deps: RegisterWorkIpcDeps): void {
     activeRuns.delete(id);
     return deleteWorkSession(id);
   });
+  // 置顶/取消置顶（会话栏右键菜单，与聊天侧语义一致）
+  ipcMain.handle(IPC.WORK_SESSIONS_PIN, (_event, payload: { id: string; pinned: boolean }) => {
+    if (!payload?.id) return false;
+    return pinWorkSession(payload.id, Boolean(payload.pinned));
+  });
+  // 手动重排序（传入当前展示的完整 ID 顺序）
+  ipcMain.handle(IPC.WORK_SESSIONS_REORDER, (_event, orderedIds: unknown) => (
+    reorderWorkSessions(Array.isArray(orderedIds) ? orderedIds as string[] : [])
+  ));
   // 目录绑定与会话创建解耦：code/learn 会话建好后可随时绑定/更换目录
   ipcMain.handle(IPC.WORK_SESSIONS_BIND_DIR, (_event, payload: { id: string; boundDir?: string }) => (
     bindWorkSessionDir(payload.id, payload.boundDir)
@@ -171,10 +203,26 @@ export function registerWorkIpc(deps: RegisterWorkIpcDeps): void {
   ipcMain.handle(IPC.WORK_PROCESS_DOCUMENTS, (_event, payload: unknown) => processWorkDocuments(payload));
 
   ipcMain.handle(IPC.WORK_CANCEL, (_event, sessionId: string) => {
+    dropPendingAsksForSession(sessionId);
     const controller = activeRuns.get(sessionId);
     if (!controller) return false;
     controller.abort();
     return true;
+  });
+
+  // 询问卡片作答回传：interactionId 对不上账的提交直接拒绝，
+  // 合法提交 resolve 给 work-agent 的 requestUserAnswer Promise。
+  ipcMain.handle(IPC.WORK_ASK_ANSWER, (_event, submission: unknown) => {
+    const rawId = submission && typeof submission === "object"
+      ? (submission as Record<string, unknown>).interactionId
+      : undefined;
+    const interactionId = typeof rawId === "string" ? rawId : "";
+    const pending = pendingAsks.get(interactionId);
+    if (!pending) return { ok: false, error: "未找到对应的询问卡片（可能已超时或已取消）" };
+    clearTimeout(pending.timer);
+    pendingAsks.delete(interactionId);
+    pending.resolve(submission as WorkAskSubmission);
+    return { ok: true };
   });
 
   ipcMain.handle(IPC.WORK_RUN, async (event, payload: { sessionId: string; text: string; attachments?: unknown }) => {
@@ -217,7 +265,9 @@ export function registerWorkIpc(deps: RegisterWorkIpcDeps): void {
         tools,
         prompts: {
           system: [deps.loadPrompt("system", sessionMode), modeContext].filter(Boolean).join("\n\n"),
-          style: deps.loadPrompt("style"),
+          // Work/Code/Learn 三个模式不加载人设风格（style 来自 soul/风格体系），
+          // 也不注入世界书，保持纯工具型回答；人设只属于日常聊天与协作管线。
+          style: "",
           router: deps.loadPrompt("router"),
           plan: deps.loadPrompt("plan"),
           actionGate: deps.loadPrompt("actionGate"),
@@ -225,6 +275,14 @@ export function registerWorkIpc(deps: RegisterWorkIpcDeps): void {
         signal: controller.signal,
         approvalWebContentsId: event.sender.id,
         onEvent: (workEvent) => send(event.sender, workEvent),
+        // 结构化询问卡片：卡片 payload 随 work:event 下发，作答经 WORK_ASK_ANSWER 回传
+        requestUserAnswer: (askPayload) => new Promise<WorkAskSubmission>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            pendingAsks.delete(askPayload.interactionId);
+            reject(new Error("work ask card timed out"));
+          }, WORK_ASK_TIMEOUT_MS);
+          pendingAsks.set(askPayload.interactionId, { sessionId: session.id, resolve, timer });
+        }),
       });
       return { ok: true };
     } catch (error) {
@@ -240,11 +298,23 @@ export function registerWorkIpc(deps: RegisterWorkIpcDeps): void {
         return { ok: true };
       }
       const message = error instanceof Error ? error.message : String(error);
+      console.error("[WorkIPC] run failed:", error);
+      // 启动阶段失败（模型未配置等）也要落成一条可见助手消息，
+      // 不能只丢进侧边活动日志，否则用户看到的是“没有任何回应”。
+      const visible: WorkMessage = {
+        id: randomUUID(),
+        role: "assistant",
+        content: `这一轮没能启动：${message}\n\n请检查 Work 模型设置后重试。`,
+        createdAt: Date.now(),
+      };
+      appendWorkMessage(session.id, visible);
       updateWorkExecutionState(session.id, { status: "failed" });
+      send(event.sender, { type: "message", message: visible });
       send(event.sender, { type: "error", message });
       send(event.sender, { type: "done", sessionId: session.id });
       return { ok: false, error: message };
     } finally {
+      dropPendingAsksForSession(session.id);
       activeRuns.delete(session.id);
     }
   });

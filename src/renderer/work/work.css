@@ -107,6 +107,7 @@
 .session-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
 .session-item { position: relative; text-align: left; padding: 10px 11px; background: transparent; border-color: transparent; }
 .session-item:hover { border-color: var(--rb-border-soft); }
+.session-item.is-pinned { border-color: var(--rb-border-soft); box-shadow: inset 2px 0 var(--rb-pink-400); }
 .session-item.is-active { background: linear-gradient(135deg, rgba(236, 72, 153, 0.14), rgba(159, 122, 234, 0.10)); border-color: var(--rb-border-soft); box-shadow: inset 2px 0 var(--rb-pink-400); }
 .session-item strong,
 .session-item span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -149,6 +150,26 @@
 .message__attachments { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
 .message__attachment { display: inline-flex; max-width: 100%; padding: 4px 8px; border: 1px solid rgba(255, 255, 255, 0.26); border-radius: var(--rb-radius-full); font-size: 10px; opacity: 0.88; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .message__attachment.is-error { border-color: rgba(255, 113, 135, 0.54); }
+
+/* ── 结构化询问卡片（ask_user 移植）：颜色全部走语义变量，随主题适配 ── */
+.wp-ask-card { max-width: min(92%, 760px); }
+.wp-ask-card__body { display: flex; flex-direction: column; gap: 12px; }
+.wp-ask-card.is-stale { opacity: 0.6; }
+.wp-ask-intro { margin: 0; color: var(--rb-text-strong); font-weight: 600; line-height: 1.6; }
+.wp-ask-question { display: flex; flex-direction: column; gap: 8px; }
+.wp-ask-question__prompt { margin: 0; color: var(--rb-text-strong); font-size: 13px; line-height: 1.6; }
+.wp-ask-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.wp-ask-option { padding: 7px 14px; border-radius: var(--rb-radius-full); border: 1px solid var(--rb-border-faint); background: color-mix(in srgb, var(--rb-bg-2) 72%, transparent); color: var(--rb-text-strong); font-size: 12.5px; cursor: pointer; transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease; }
+.wp-ask-option:hover { border-color: var(--rb-accent-soft, rgba(236, 72, 153, 0.5)); }
+.wp-ask-option.is-selected { border-color: rgba(236, 72, 153, 0.75); background: linear-gradient(135deg, rgba(236, 72, 153, 0.22), rgba(159, 122, 234, 0.22)); box-shadow: 0 4px 14px rgba(236, 72, 153, 0.14); }
+.wp-ask-option:disabled { cursor: default; opacity: 0.75; }
+.wp-ask-custom { padding: 8px 12px; border-radius: 10px; border: 1px solid var(--rb-border-faint); background: color-mix(in srgb, var(--rb-bg-1) 80%, transparent); color: var(--rb-text-strong); font-size: 13px; outline: none; }
+.wp-ask-custom:focus { border-color: rgba(236, 72, 153, 0.6); }
+.wp-ask-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+.wp-ask-note { color: var(--rb-text-faint); font-size: 11.5px; }
+.wp-ask-note.is-done { color: var(--rb-text-faint); margin: 0; }
+.wp-ask-submit { padding: 8px 18px; border-radius: var(--rb-radius-full); border: none; background: linear-gradient(135deg, rgba(236, 72, 153, 0.88), rgba(159, 122, 234, 0.88)); color: #fff; font-size: 12.5px; font-weight: 600; cursor: pointer; box-shadow: 0 6px 18px rgba(236, 72, 153, 0.18); }
+.wp-ask-submit:disabled { opacity: 0.6; cursor: default; }
 
 .composer__file-tags { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px clamp(18px, 3vw, 34px) 0; background: color-mix(in srgb, var(--rb-bg-1) 86%, transparent); }
 .composer__file-tags:empty { display: none; }

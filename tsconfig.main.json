@@ -11,7 +11,12 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "declaration": false,
-    "sourceMap": true
+    "sourceMap": true,
+    // vscode-jsonrpc 的子路径导出（./node）需要 exports 解析；node10 解析下用 paths 补类型映射，运行时不受影响
+    "baseUrl": ".",
+    "paths": {
+      "vscode-jsonrpc/node": ["node_modules/vscode-jsonrpc/lib/node/main.d.ts"]
+    }
   },
   "include": ["src/main/**/*.ts", "src/shared/**/*.ts"],
   "exclude": ["src/shared/renderer-base.ts"]

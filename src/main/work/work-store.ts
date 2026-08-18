@@ -14,11 +14,15 @@ import type {
 const ROOT_DIR_NAME = "cyrene-work";
 const SESSIONS_DIR_NAME = "sessions";
 const INDEX_FILE_NAME = "index.json";
+const ORDER_FILE_NAME = "rail-order.json";
 
 let rootDir = "";
 let sessionsDir = "";
 let indexPath = "";
+let orderPath = "";
 let indexCache: WorkSessionMeta[] = [];
+/** 用户手动排序的会话 ID 列表（与聊天侧 customOrder 语义一致）。 */
+let customOrder: string[] = [];
 
 function atomicWriteJson(filePath: string, value: unknown): void {
   const tempPath = `${filePath}.tmp`;
@@ -30,17 +34,47 @@ function ensureInitialized(): void {
   rootDir = path.join(app.getPath("userData"), ROOT_DIR_NAME);
   sessionsDir = path.join(rootDir, SESSIONS_DIR_NAME);
   indexPath = path.join(rootDir, INDEX_FILE_NAME);
+  orderPath = path.join(rootDir, ORDER_FILE_NAME);
   fs.mkdirSync(sessionsDir, { recursive: true });
   try {
     const parsed = fs.existsSync(indexPath)
       ? JSON.parse(fs.readFileSync(indexPath, "utf8")) as unknown
       : [];
     indexCache = Array.isArray(parsed)
-      ? parsed.filter(isWorkSessionMeta).sort((a, b) => b.updatedAt - a.updatedAt)
+      ? parsed.filter(isWorkSessionMeta)
       : [];
   } catch {
     indexCache = [];
   }
+  try {
+    const parsedOrder = fs.existsSync(orderPath)
+      ? JSON.parse(fs.readFileSync(orderPath, "utf8")) as unknown
+      : [];
+    customOrder = Array.isArray(parsedOrder)
+      ? parsedOrder.filter((x): x is string => typeof x === "string")
+      : [];
+  } catch {
+    customOrder = [];
+  }
+  sortIndexCache();
+}
+
+/** 排序规则：置顶优先 → 手动顺序 → updatedAt 降序（与聊天侧会话栏一致）。 */
+function sortIndexCache(): void {
+  const orderIdx = new Map(customOrder.map((id, i) => [id, i]));
+  indexCache.sort((a, b) => {
+    const aPin = a.pinned ? 0 : 1;
+    const bPin = b.pinned ? 0 : 1;
+    if (aPin !== bPin) return aPin - bPin;
+    const aOrder = orderIdx.has(a.id) ? orderIdx.get(a.id)! : Infinity;
+    const bOrder = orderIdx.has(b.id) ? orderIdx.get(b.id)! : Infinity;
+    if (aOrder !== bOrder) return aOrder - bOrder;
+    return b.updatedAt - a.updatedAt;
+  });
+}
+
+function persistOrder(): void {
+  atomicWriteJson(orderPath, customOrder);
 }
 
 function isWorkSessionMeta(value: unknown): value is WorkSessionMeta {
@@ -65,12 +99,14 @@ export function workSessionMode(session: WorkSession): WorkSessionMode {
 
 function metaFromSession(session: WorkSession): WorkSessionMeta {
   const mode = workSessionMode(session);
+  const existing = indexCache.find((item) => item.id === session.id);
   return {
     id: session.id,
     title: session.title,
     status: session.status,
     messageCount: session.messages.length,
     ...(mode !== "work" ? { mode } : {}),
+    ...(existing?.pinned ? { pinned: true } : {}),
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
   };
@@ -83,7 +119,7 @@ function persistSession(session: WorkSession): void {
   const index = indexCache.findIndex((item) => item.id === session.id);
   if (index >= 0) indexCache[index] = meta;
   else indexCache.push(meta);
-  indexCache.sort((a, b) => b.updatedAt - a.updatedAt);
+  sortIndexCache();
   atomicWriteJson(indexPath, indexCache);
 }
 
@@ -197,8 +233,33 @@ export function deleteWorkSession(id: string): boolean {
   if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
   const before = indexCache.length;
   indexCache = indexCache.filter((item) => item.id !== id);
+  customOrder = customOrder.filter((itemId) => itemId !== id);
+  persistOrder();
   if (before !== indexCache.length) atomicWriteJson(indexPath, indexCache);
   return before !== indexCache.length;
+}
+
+/** 置顶/取消置顶会话（会话栏右键菜单）。 */
+export function pinWorkSession(id: string, pinned: boolean): boolean {
+  ensureInitialized();
+  const meta = indexCache.find((item) => item.id === id);
+  if (!meta) return false;
+  if (pinned) meta.pinned = true;
+  else delete meta.pinned;
+  sortIndexCache();
+  atomicWriteJson(indexPath, indexCache);
+  return true;
+}
+
+/** 重新排序会话列表（传入当前展示的完整 ID 顺序）。 */
+export function reorderWorkSessions(orderedIds: string[]): boolean {
+  ensureInitialized();
+  if (!Array.isArray(orderedIds)) return false;
+  customOrder = orderedIds.filter((id) => typeof id === "string" && indexCache.some((item) => item.id === id));
+  persistOrder();
+  sortIndexCache();
+  atomicWriteJson(indexPath, indexCache);
+  return true;
 }
 
 export async function openWorkFolder(): Promise<void> {

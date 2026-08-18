@@ -19,6 +19,7 @@ import { type ToolCallResult } from "./types";
 import { checkPermission, type ToolRiskLevel } from "../permission";
 import { getAdapterForConfig, type ChatMessage } from "./vendors";
 import { extractLastUserQuery, type ToolContext } from "./tool-context";
+import { runHistoryRetrievalV2AutoProbe } from "./history-tools";
 import {
   runTwoPhaseFcLoop,
   type TwoPhaseEvent,
@@ -31,6 +32,24 @@ export interface AgentLoopSettings {
   model: string;
   apiKey: string;
   explicitTransport?: "openai" | "anthropic" | "auto";
+}
+
+// ── auto_probe 延迟去重 ──
+// probe 只写 shadow 日志、不参与回复生成。同一条召回类消息刚跑完 auto_injection
+// 全量管线时，紧接着再跑一遍 probe 会在回复窗口内制造第二次 CPU 爆发
+//（5 路嵌入 + 重排，ORT 默认吃满全核），挤掉 Live2D/Minecraft 的帧。
+// 推迟到空闲窗口，且同一时刻只保留一个待跑 probe，避免连续消息叠加。
+const HISTORY_AUTO_PROBE_DELAY_MS = 30_000;
+let pendingAutoProbeTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleHistoryRetrievalAutoProbe(userQuery: string, runStartedAt: number): void {
+  if (pendingAutoProbeTimer) clearTimeout(pendingAutoProbeTimer);
+  pendingAutoProbeTimer = setTimeout(() => {
+    pendingAutoProbeTimer = null;
+    void runHistoryRetrievalV2AutoProbe(userQuery, 90, runStartedAt).catch((error) => {
+      console.warn("[History/RetrievalV2AutoProbe] failed:", error);
+    });
+  }, HISTORY_AUTO_PROBE_DELAY_MS);
 }
 
 /** CyreneAgent.run() 需要的输入——桥层构造好后塞进 input.state 或 forwardedProps。 */
@@ -53,6 +72,8 @@ export interface CyreneRunOptions {
   /** 可选：Soul 阶段尾部锚点（压缩版硬行为规则，追加在对话之后）。 */
   soulTailAnchorContent?: string;
   socialContext?: import("../social-context").SocialTurnContext;
+  /** 仅诊断：显式回忆问题未调用 recall_history 时，回复完成后运行只读 shadow。 */
+  enableHistoryRetrievalAutoProbe?: boolean;
 }
 
 /** FC 循环最终结果（供桥层做副作用用）。 */
@@ -177,6 +198,7 @@ export class CyreneAgent extends AbstractAgent {
 
       (async () => {
         try {
+          const runStartedAt = Date.now();
           subscriber.next({ type: EventType.RUN_STARTED, threadId, runId });
 
           const adapter = getAdapterForConfig(options.settings);
@@ -210,6 +232,15 @@ export class CyreneAgent extends AbstractAgent {
             soulPhaseReason: result.soulPhaseReason,
             socialContext: options.socialContext,
           };
+
+          if (
+            options.enableHistoryRetrievalAutoProbe
+            && !result.toolResults.some((toolResult) => toolResult.toolId === "recall_history")
+          ) {
+            // 延迟到空闲窗口跑（见 scheduleHistoryRetrievalAutoProbe 注释），
+            // 避免与刚结束的 auto_injection 管线在回复窗口内叠加 CPU 爆发。
+            scheduleHistoryRetrievalAutoProbe(extractLastUserQuery(options.messages), runStartedAt);
+          }
 
           if (cancelled) return;
           subscriber.next({

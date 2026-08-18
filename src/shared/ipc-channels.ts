@@ -55,6 +55,8 @@ export const IPC = {
   WORK_SESSIONS_CREATE: "work:sessions:create",
   WORK_SESSIONS_RENAME: "work:sessions:rename",
   WORK_SESSIONS_DELETE: "work:sessions:delete",
+  WORK_SESSIONS_PIN: "work:sessions:pin",
+  WORK_SESSIONS_REORDER: "work:sessions:reorder",
   WORK_SESSIONS_BIND_DIR: "work:sessions:bind-dir",
   WORK_OPEN_FOLDER: "work:open-folder",
   WORK_SELECT_DIR: "work:select-dir",
@@ -65,6 +67,8 @@ export const IPC = {
   WORK_RUN: "work:run",
   WORK_CANCEL: "work:cancel",
   WORK_EVENT: "work:event",
+  /** 结构化询问卡片作答回传（渲染层 → 主进程）。 */
+  WORK_ASK_ANSWER: "work:ask-answer",
 
   // tasks window (read-only display, no per-element interactions)
   TASKS_CLOSE: "tasks:close",
@@ -223,6 +227,11 @@ export const IPC = {
   PLUGIN_OPEN_WINDOW: "plugin:open-window",
   PLUGIN_RELAUNCH_ADMIN: "plugin:relaunch-admin",
 
+  // plugin panel (独立插件面板窗口；入口为主界面/侧栏的「插件」按钮)
+  PLUGIN_PANEL_OPEN: "plugin-panel:open",
+  PLUGIN_PANEL_MINIMIZE: "plugin-panel:minimize",
+  PLUGIN_PANEL_CLOSE: "plugin-panel:close",
+
   // scheduled tasks
   SCHEDULER_LIST: "scheduler:list",
   SCHEDULER_ADD: "scheduler:add",
@@ -346,5 +355,31 @@ export const IPC = {
   MUSIC_DETECT_PLAYER: "music:detect-player",
   MUSIC_STATE_CHANGED: "music:state-changed",
   MUSIC_CARD: "music:card",
+
+  // Code Git 工作台（上游新增功能：Code 模式工作区的分支/提交/推送与变更监听）
+  CODE_GIT_STATUS: "code-git:status",
+  CODE_GIT_WATCH: "code-git:watch",
+  CODE_GIT_UNWATCH: "code-git:unwatch",
+  CODE_GIT_SWITCH_BRANCH: "code-git:switch-branch",
+  CODE_GIT_COMMIT: "code-git:commit",
+  CODE_GIT_PUSH: "code-git:push",
+  CODE_GIT_CHANGED: "code-git:changed",
+
+  // screenshot（原生截图助手：全局热键 / 聊天截图按钮，来自上游新增功能）
+  SCREENSHOT_START: "screenshot:start",
+  SCREENSHOT_SAVE_TEMP: "screenshot:save-temp",
+  SCREENSHOT_INSERT: "screenshot:insert",
+  SCREENSHOT_HOTKEY_CAPTURE_START: "screenshot:hotkey-capture-start",
+  SCREENSHOT_HOTKEY_CAPTURE_END: "screenshot:hotkey-capture-end",
 } as const;
+
+/** 截图完成后推送到聊天窗口的插入载荷（previewUrl 为 data URL，兼容 file:// 拦截）。 */
+export interface ScreenshotInsertPayload {
+  mime: "image/png";
+  width: number;
+  height: number;
+  filePath: string;
+  previewUrl: string;
+  hasAnnotations: boolean;
+}
 
